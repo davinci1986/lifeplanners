@@ -38,6 +38,8 @@ function ensureDefaults() {
   if (!DB.cases) DB.cases = [];
   if (!DB.reminders) DB.reminders = [];
   if (!DB.settings) DB.settings = {};
+  if (!DB.customCategories) DB.customCategories = [];
+  if (!DB.customLabels) DB.customLabels = {};
 }
 
 function uid() {
@@ -105,7 +107,10 @@ function searchContacts(q) {
 /* ---------- CASES ---------- */
 function getCases(category = null) {
   if (!category) return DB.cases;
-  return DB.cases.filter(c => c.category === category);
+  return DB.cases.filter(c =>
+    c.category === category ||
+    (c.categories && c.categories.includes(category))
+  );
 }
 
 function getCase(id) { return DB.cases.find(c => c.id === id); }
@@ -115,24 +120,28 @@ function getCasesForContact(contactId) {
 }
 
 function createCase(data) {
+  const primaryCat = data.category || 'others';
+  const allCats = data.categories && data.categories.length > 0 ? data.categories : [primaryCat];
   const c = {
     id: uid(),
     ownerEmail: data.ownerEmail || (typeof GAUTH !== 'undefined' ? GAUTH.currentUser?.email : '') || '',
     contactId: data.contactId || null,
     contactName: data.contactName || '',
-    category: data.category || 'others',
-    label: data.label || '',          // B1-B5, C1-C8, etc.
-    subLabel: data.subLabel || '',    // AIA / Snapwill for sales
+    category: primaryCat,
+    categories: allCats,           // multi-category support
+    label: data.label || '',       // B1-B5, C1-C8, custom, etc.
+    subLabel: data.subLabel || '', // AIA / Snapwill for sales
     currentStatus: data.currentStatus || 1,
     statusHistory: data.statusHistory || [],
+    customStatusLabels: data.customStatusLabels || {}, // {stepN: 'Custom label'}
     remarks: data.remarks || '',
     reminders: data.reminders || [],
     priority: data.priority || false,
     kiv: data.kiv || false,
     followUp: data.followUp || false,
-    premiums: data.premiums || [],            // [{plan, amount, company}]
-    examinations: data.examinations || [],    // [{type, date, time, venue}]
-    recruitPrograms: data.recruitPrograms || [],  // RintiZ, Next Gen, etc.
+    premiums: data.premiums || [],
+    examinations: data.examinations || [],
+    recruitPrograms: data.recruitPrograms || [],
     fieldwork: data.fieldwork || [],
     closedDate: data.closedDate || null,
     customFields: data.customFields || {},
@@ -178,14 +187,14 @@ function advanceCaseStatus(id, remark = '', nextStatus = null) {
   return updated;
 }
 
-function setStatus(id, status, remark = '') {
+function setStatus(id, status, remark = '', customDate = null) {
   const c = getCase(id);
   if (!c) return null;
   const histEntry = {
     fromStatus: c.currentStatus,
     toStatus: status,
     remark,
-    date: new Date().toISOString()
+    date: customDate ? new Date(customDate).toISOString() : new Date().toISOString()
   };
   return updateCase(id, {
     currentStatus: status,
@@ -319,15 +328,38 @@ const STATUS_DEFS = {
   others: []
 };
 
-function getStatusDef(category) { return STATUS_DEFS[category] || []; }
+function getStatusDef(category) {
+  if (STATUS_DEFS[category]) return STATUS_DEFS[category];
+  // Check custom categories
+  const custom = (DB.customCategories || []).find(c => c.id === category);
+  return custom ? (custom.statuses || []) : [];
+}
 
-function getStatusLabel(category, status) {
+// Get label — checks case's custom overrides first
+function getStatusLabel(category, status, caseObj = null) {
+  if (caseObj?.customStatusLabels?.[status]) return caseObj.customStatusLabels[status];
   const defs = getStatusDef(category);
   const d = defs.find(x => x.n === status);
   return d ? d.label : `Status ${status}`;
 }
 
-/* ---------- LABELS ---------- */
+/* ---------- CUSTOM LABEL DEFS (user-added) ---------- */
+function getCustomLabelDefs(category) {
+  return (DB.customLabels || {})[category] || [];
+}
+function addCustomLabel(category, labelObj) {
+  if (!DB.customLabels) DB.customLabels = {};
+  if (!DB.customLabels[category]) DB.customLabels[category] = [];
+  DB.customLabels[category].push({ id: labelObj.id || uid(), label: labelObj.label });
+  saveDB();
+}
+function deleteCustomLabel(category, labelId) {
+  if (!DB.customLabels?.[category]) return;
+  DB.customLabels[category] = DB.customLabels[category].filter(l => l.id !== labelId);
+  saveDB();
+}
+
+/* ---------- BUILT-IN LABELS ---------- */
 const LABEL_DEFS = {
   claims: [
     { id: 'B1', label: 'Pre/Post Hospitalization' },
@@ -348,7 +380,67 @@ const LABEL_DEFS = {
   ]
 };
 
-function getLabelDefs(category) { return LABEL_DEFS[category] || []; }
+function getLabelDefs(category) {
+  const builtin = LABEL_DEFS[category] || [];
+  const custom = getCustomLabelDefs(category);
+  return [...builtin, ...custom];
+}
+
+/* ---------- CUSTOM CATEGORIES ---------- */
+function getCustomCategories() { return DB.customCategories || []; }
+
+function createCustomCategory(data) {
+  const cat = {
+    id: 'cat_' + uid(),
+    name: data.name || 'New Category',
+    icon: data.icon || '📁',
+    color: data.color || '#007AFF',
+    bg: data.bg || '#E8F0FE',
+    statuses: data.statuses || [{ n: 1, label: 'Step 1' }],
+    createdAt: new Date().toISOString()
+  };
+  if (!DB.customCategories) DB.customCategories = [];
+  DB.customCategories.push(cat);
+  saveDB();
+  refreshSidebarCategories();
+  return cat;
+}
+
+function updateCustomCategory(id, data) {
+  const idx = (DB.customCategories || []).findIndex(c => c.id === id);
+  if (idx < 0) return;
+  DB.customCategories[idx] = { ...DB.customCategories[idx], ...data };
+  saveDB();
+  refreshSidebarCategories();
+}
+
+function deleteCustomCategory(id) {
+  DB.customCategories = (DB.customCategories || []).filter(c => c.id !== id);
+  saveDB();
+  refreshSidebarCategories();
+}
+
+function addStatusToCustomCategory(catId, label) {
+  const cat = (DB.customCategories || []).find(c => c.id === catId);
+  if (!cat) return;
+  const maxN = (cat.statuses || []).reduce((m, s) => Math.max(m, s.n), 0);
+  cat.statuses = [...(cat.statuses || []), { n: maxN + 1, label }];
+  saveDB();
+}
+
+function updateStatusInCustomCategory(catId, statusN, newLabel) {
+  const cat = (DB.customCategories || []).find(c => c.id === catId);
+  if (!cat) return;
+  cat.statuses = cat.statuses.map(s => s.n === statusN ? { ...s, label: newLabel } : s);
+  saveDB();
+}
+
+function removeStatusFromCustomCategory(catId, statusN) {
+  const cat = (DB.customCategories || []).find(c => c.id === catId);
+  if (!cat) return;
+  cat.statuses = cat.statuses.filter(s => s.n !== statusN);
+  saveDB();
+}
 
 /* ---------- WORKING DAYS ---------- */
 function addWorkingDays(date, days) {

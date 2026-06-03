@@ -87,7 +87,10 @@ function openSalesCase(id) {
 }
 
 function renderNewCaseForm(category, existingCase = null) {
-  const cats = ['sales','claims','servicing','recruitment','onboarding','snapwill','others'];
+  const allBuiltinCats = ['sales','claims','servicing','recruitment','onboarding','snapwill','others'];
+  const allCustomCats = getCustomCategories();
+  const allCats = [...allBuiltinCats.map(id => ({ id, ...catMeta(id) })), ...allCustomCats.map(c => ({ id: c.id, label: c.name, icon: c.icon }))];
+  const existingCats = existingCase?.categories || [category];
   const labelDefs = getLabelDefs(category);
   const isEdit = !!existingCase;
 
@@ -97,6 +100,18 @@ function renderNewCaseForm(category, existingCase = null) {
       <input class="form-control" id="nf_name" placeholder="Enter name..." value="${escHtml(existingCase?.contactName||'')}" oninput="autofillContact(this.value)" autocomplete="off" />
       <div id="contactSuggestions" class="suggestion-chips"></div>
     </div>
+
+    <div class="form-group">
+      <label class="form-label">Categories (select all that apply)</label>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        ${allCats.map(c => `
+          <label class="checkbox-wrap" style="background:var(--bg);border:1.5px solid var(--border);border-radius:8px;padding:6px 10px;cursor:pointer">
+            <input type="checkbox" name="nf_categories" value="${c.id}" ${existingCats.includes(c.id)?'checked':''} onchange="playClick()">
+            ${c.icon || ''} ${c.label}
+          </label>`).join('')}
+      </div>
+    </div>
+
     ${category === 'sales' ? `
     <div class="form-group">
       <label class="form-label">Company</label>
@@ -105,14 +120,29 @@ function renderNewCaseForm(category, existingCase = null) {
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="sublabel" value="Snapwill" ${existingCase?.subLabel==='Snapwill'?'checked':''} onchange="playClick()"> Snapwill</label>
       </div>
     </div>` : ''}
+
     ${labelDefs.length > 0 ? `
     <div class="form-group">
       <label class="form-label">Label</label>
-      <select class="form-control" id="nf_label">
-        <option value="">Select label...</option>
-        ${labelDefs.map(l => `<option value="${l.id}" ${existingCase?.label===l.id?'selected':''}>${l.id} — ${l.label}</option>`).join('')}
-      </select>
-    </div>` : ''}
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px" id="labelChips">
+        ${labelDefs.map(l => `
+          <label class="checkbox-wrap" style="background:var(--bg);border:1.5px solid var(--border);border-radius:8px;padding:5px 10px;cursor:pointer;font-size:12px">
+            <input type="radio" name="nf_label" value="${l.id}" ${existingCase?.label===l.id?'checked':''}> ${l.id} — ${l.label}
+          </label>`).join('')}
+      </div>
+      <div style="display:flex;gap:6px;margin-top:4px">
+        <input class="form-control" id="nf_custom_label" placeholder="Or type a custom label..." style="font-size:12px" value="${existingCase?.label && !labelDefs.find(l=>l.id===existingCase.label) ? escHtml(existingCase.label) : ''}" />
+        <button class="btn btn-secondary btn-sm" onclick="addLabelToCategory('${category}')">+ Save</button>
+      </div>
+    </div>` : `
+    <div class="form-group">
+      <label class="form-label">Label / Tag</label>
+      <div style="display:flex;gap:6px">
+        <input class="form-control" id="nf_custom_label" placeholder="Enter a label..." value="${escHtml(existingCase?.label||'')}" />
+        <button class="btn btn-secondary btn-sm" onclick="addLabelToCategory('${category}')">+ Save</button>
+      </div>
+    </div>`}
+
     <div class="form-group">
       <label class="form-label">Remarks</label>
       <textarea class="form-control" id="nf_remarks" rows="2" placeholder="Optional notes...">${escHtml(existingCase?.remarks||'')}</textarea>
@@ -125,6 +155,15 @@ function renderNewCaseForm(category, existingCase = null) {
       <button class="btn btn-primary" onclick="saveNewCase('${category}','${existingCase?.id||''}')">${isEdit ? 'Save Changes' : 'Create Case'}</button>
     </div>
   `;
+}
+
+function addLabelToCategory(category) {
+  const input = document.getElementById('nf_custom_label');
+  const val = input?.value?.trim();
+  if (!val) return;
+  addCustomLabel(category, { label: val });
+  showToast('Label saved!', 'success');
+  playClick();
 }
 
 function autofillContact(val) {
@@ -152,8 +191,16 @@ function saveNewCase(category, existingId = '') {
   const name = nameEl?.value?.trim();
   if (!name) { showToast('Please enter a name', 'error'); return; }
 
+  // Multi-category selection
+  const catCheckboxes = document.querySelectorAll('input[name="nf_categories"]:checked');
+  const selectedCats = catCheckboxes.length > 0 ? [...catCheckboxes].map(cb => cb.value) : [category];
+  const primaryCat = selectedCats.includes(category) ? category : (selectedCats[0] || category);
+
   const subLabelEl = document.querySelector('input[name="sublabel"]:checked');
-  const labelEl = document.getElementById('nf_label');
+  // Label: radio selection OR custom text input
+  const labelRadio = document.querySelector('input[name="nf_label"]:checked');
+  const labelCustom = document.getElementById('nf_custom_label')?.value?.trim();
+  const label = labelRadio?.value || labelCustom || '';
   const remarks = document.getElementById('nf_remarks')?.value || '';
   const priority = document.getElementById('nf_priority')?.checked || false;
 
@@ -170,20 +217,23 @@ function saveNewCase(category, existingId = '') {
     updateCase(existingId, {
       contactName: contact.name,
       contactId: contact.id,
+      category: primaryCat,
+      categories: selectedCats,
       subLabel: subLabelEl?.value || '',
-      label: labelEl?.value || '',
+      label,
       remarks,
       priority
     });
     showToast('Case updated', 'success');
     playSuccess();
   } else {
-    const c = createCase({
+    createCase({
       contactId: contact.id,
       contactName: contact.name,
-      category,
+      category: primaryCat,
+      categories: selectedCats,
       subLabel: subLabelEl?.value || '',
-      label: labelEl?.value || '',
+      label,
       remarks,
       priority,
       currentStatus: 1,
@@ -231,23 +281,14 @@ function renderCaseDetail(c, contact) {
 
       <div class="status-steps">
         ${statusDefs.map(s => {
-          let cls = 'future';
-          if (s.n < c.currentStatus) cls = 'done-step';
-          else if (s.n === c.currentStatus) cls = 'current';
+          const isDone = s.n < c.currentStatus;
+          const isCurrent = s.n === c.currentStatus;
           const hist = (c.statusHistory || []).filter(h => h.toStatus === s.n).pop();
-          return `
-            <div class="status-step ${cls}" onclick="setStatusFromStep('${c.id}',${s.n})">
-              <div class="step-circle">${cls === 'done-step' ? '✓' : s.n}</div>
-              <div class="step-info">
-                <div class="step-label">${escHtml(s.label)}</div>
-                ${hist ? `<div class="step-date">${formatDate(hist.date)}</div>` : ''}
-                ${hist?.remark ? `<div class="step-remark">${escHtml(hist.remark)}</div>` : ''}
-              </div>
-              ${s.n === c.currentStatus ? `
-                <div class="step-actions" onclick="event.stopPropagation()">
-                  <button class="btn btn-primary btn-sm" onclick="advanceStatus('${c.id}')">Next →</button>
-                </div>` : ''}
-            </div>`;
+          const customLabel = c.customStatusLabels?.[s.n] || s.label;
+          return renderStatusStep(c, s, {
+            isDone, isCurrent, histEntry: hist,
+            onClickFn: `openSetStatusWithDate('${c.id}',${s.n},'${escHtml(customLabel)}')`
+          });
         }).join('')}
       </div>
 

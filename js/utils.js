@@ -167,7 +167,13 @@ const CAT_META = {
   snapwill:    { label: 'Snapwill',    icon: '⚡', color: '#FF2D55', bg: '#FFE5EA' },
   others:      { label: 'Others',      icon: '📌', color: '#6B6B6E', bg: '#F5F5F7' }
 };
-function catMeta(category) { return CAT_META[category] || CAT_META.others; }
+function catMeta(category) {
+  if (CAT_META[category]) return CAT_META[category];
+  // Check custom categories
+  const custom = (typeof DB !== 'undefined') ? (DB.customCategories || []).find(c => c.id === category) : null;
+  if (custom) return { label: custom.name, icon: custom.icon, color: custom.color, bg: custom.bg };
+  return CAT_META.others;
+}
 
 function statusClass(category, status) {
   return `s${Math.min(status, 9)}`;
@@ -175,10 +181,12 @@ function statusClass(category, status) {
 
 /* ---------- RENDER CASE ROW ---------- */
 function renderCaseRow(c, onClick) {
-  const statusLabel = getStatusLabel(c.category, c.currentStatus);
+  const statusLabel = getStatusLabel(c.category, c.currentStatus, c);
   const sc = statusClass(c.category, c.currentStatus);
   const dueRem = getDueReminders().filter(r => r.caseId === c.id);
   const hasOverdue = dueRem.length > 0;
+  // Show all categories (multi-category)
+  const extraCats = (c.categories || []).filter(cat => cat !== c.category);
   return `
     <div class="case-item ${c.priority ? 'priority' : ''}" onclick="${onClick}('${c.id}')">
       ${avatarHTML(c.contactName || '?')}
@@ -188,6 +196,7 @@ function renderCaseRow(c, onClick) {
           ${c.label ? `<span class="label-badge">${escHtml(c.label)}</span>` : ''}
           ${c.subLabel ? `<span class="label-badge">${escHtml(c.subLabel)}</span>` : ''}
           <span class="status-badge ${sc}">${escHtml(statusLabel)}</span>
+          ${extraCats.map(cat => `<span class="label-badge" style="background:${catMeta(cat).bg};color:${catMeta(cat).color}">${catMeta(cat).icon} ${catMeta(cat).label}</span>`).join('')}
           ${hasOverdue ? `<span class="status-badge overdue">🔔 ${dueRem.length}</span>` : ''}
           ${c.remarks ? `<span class="text-xs text-muted" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(c.remarks)}</span>` : ''}
         </div>
@@ -397,4 +406,165 @@ function renderReminderItem(r) {
 
 function emptyState(icon, title, sub) {
   return `<div class="empty-state"><div class="empty-state-icon">${icon}</div><div class="empty-state-title">${title}</div><div class="empty-state-sub">${sub}</div></div>`;
+}
+
+/* ---------- UNIVERSAL STATUS STEP RENDERER ---------- */
+// Renders a single status step with editable label, date, reminder button
+function renderStatusStep(c, stepDef, options = {}) {
+  const {
+    isCurrent = false,
+    isDone = false,
+    histEntry = null,
+    onClickFn = null,    // string: JS to call when step is clicked
+    extraContent = ''    // extra HTML inside step (e.g. branch choices)
+  } = options;
+
+  let cls = 'future';
+  if (isDone) cls = 'done-step';
+  else if (isCurrent) cls = 'current';
+
+  // Get label — check custom labels first
+  const customLabel = c.customStatusLabels?.[stepDef.n];
+  const displayLabel = customLabel || stepDef.label;
+
+  return `
+    <div class="status-step ${cls}" id="step-${c.id}-${stepDef.n}" onclick="${onClickFn || `setStatusFromStep('${c.id}',${stepDef.n})`}">
+      <div class="step-circle">${isDone ? '✓' : stepDef.n}</div>
+      <div class="step-info" style="flex:1">
+        <div class="step-label-row">
+          <span class="step-label" id="step-lbl-${c.id}-${stepDef.n}">${escHtml(displayLabel)}</span>
+          <button class="step-edit-btn" title="Edit step name" onclick="event.stopPropagation();openEditStepLabel('${c.id}',${stepDef.n},'${escHtml(displayLabel)}')" style="opacity:0.5;background:none;border:none;cursor:pointer;font-size:11px;padding:0 4px">✏</button>
+        </div>
+        ${histEntry?.date ? `<div class="step-date">📅 ${formatDate(histEntry.date)}</div>` : ''}
+        ${histEntry?.remark ? `<div class="step-remark">${escHtml(histEntry.remark)}</div>` : ''}
+      </div>
+      <div class="step-actions" onclick="event.stopPropagation()">
+        <button class="btn btn-secondary btn-sm" title="Set reminder" onclick="openQuickReminder('${c.id}','${escHtml(c.contactName)}','${c.category}','${escHtml(displayLabel)}')">🔔</button>
+      </div>
+    </div>
+    ${extraContent}`;
+}
+
+/* ---------- EDIT STEP LABEL ---------- */
+function openEditStepLabel(caseId, stepN, currentLabel) {
+  playClick();
+  document.getElementById('contactModalTitle').textContent = '✏ Rename Step';
+  document.getElementById('contactModalBody').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">Step ${stepN} — New Name</label>
+      <input class="form-control" id="step_label_input" value="${escHtml(currentLabel)}" placeholder="Step name..." />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Date for this step</label>
+      <input type="date" class="form-control" id="step_label_date" value="${todayStr()}" />
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeContactModalBtn()">Cancel</button>
+      <button class="btn btn-danger btn-sm" onclick="resetStepLabel('${caseId}',${stepN})">Reset to Default</button>
+      <button class="btn btn-primary" onclick="saveStepLabel('${caseId}',${stepN})">Save</button>
+    </div>`;
+  openModal('contactModal');
+}
+
+function saveStepLabel(caseId, stepN) {
+  const newLabel = document.getElementById('step_label_input')?.value?.trim();
+  const newDate = document.getElementById('step_label_date')?.value;
+  if (!newLabel) { showToast('Please enter a label', 'error'); return; }
+  const c = getCase(caseId);
+  if (!c) return;
+  const customLabels = { ...(c.customStatusLabels || {}) };
+  customLabels[stepN] = newLabel;
+  // Also update history entry date if provided
+  let history = [...(c.statusHistory || [])];
+  const existingIdx = history.findLastIndex ? history.findLastIndex(h => h.toStatus === stepN) : history.map(h=>h.toStatus).lastIndexOf(stepN);
+  if (newDate && existingIdx >= 0) {
+    history[existingIdx] = { ...history[existingIdx], date: newDate + 'T00:00:00.000Z' };
+  } else if (newDate && existingIdx < 0) {
+    // Add a history entry with the date
+    history.push({ fromStatus: stepN - 1, toStatus: stepN, remark: '', date: newDate + 'T00:00:00.000Z' });
+  }
+  updateCase(caseId, { customStatusLabels: customLabels, statusHistory: history });
+  showToast('Step name saved!', 'success');
+  playSuccess();
+  closeContactModalBtn();
+  openCaseById(caseId);
+}
+
+function resetStepLabel(caseId, stepN) {
+  const c = getCase(caseId);
+  if (!c) return;
+  const customLabels = { ...(c.customStatusLabels || {}) };
+  delete customLabels[stepN];
+  updateCase(caseId, { customStatusLabels: customLabels });
+  showToast('Reset to default', 'info');
+  closeContactModalBtn();
+  openCaseById(caseId);
+}
+
+/* ---------- SET STATUS WITH DATE PICKER ---------- */
+function openSetStatusWithDate(caseId, stepN, stepLabel) {
+  playClick();
+  document.getElementById('contactModalTitle').textContent = `Set: ${stepLabel}`;
+  document.getElementById('contactModalBody').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">Date</label>
+      <input type="date" class="form-control" id="ssd_date" value="${todayStr()}" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Remark (optional)</label>
+      <textarea class="form-control" id="ssd_remark" rows="2" placeholder="Notes..."></textarea>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeContactModalBtn()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmSetStatusWithDate('${caseId}',${stepN})">✓ Confirm</button>
+    </div>`;
+  openModal('contactModal');
+}
+
+function confirmSetStatusWithDate(caseId, stepN) {
+  const date = document.getElementById('ssd_date')?.value;
+  const remark = document.getElementById('ssd_remark')?.value || '';
+  setStatus(caseId, stepN, remark, date);
+  showToast('Status updated!', 'success');
+  playSuccess();
+  closeContactModalBtn();
+  setTimeout(() => { openCaseById(caseId); updateBadges(); }, 50);
+  renderCurrentPage();
+}
+
+/* ---------- SIDEBAR DYNAMIC CATEGORIES ---------- */
+function refreshSidebarCategories() {
+  const container = document.getElementById('customCatNav');
+  const section = document.getElementById('customCatSection');
+  if (!container) return;
+  const customs = getCustomCategories();
+  if (section) section.style.display = customs.length > 0 ? 'block' : 'none';
+  container.innerHTML = customs.map(cat => `
+    <a class="nav-item" data-page="${cat.id}" onclick="navigateTo('${cat.id}')">
+      <span class="nav-icon" style="font-size:16px">${cat.icon}</span>
+      <span>${escHtml(cat.name)}</span>
+      <span class="nav-badge" id="badge-${cat.id}"></span>
+    </a>`).join('');
+  // Register pages dynamically
+  customs.forEach(cat => {
+    PAGE_MAP[cat.id] = { render: () => renderCustomCategory(cat.id), title: cat.name };
+  });
+}
+
+/* ---------- CUSTOM CATEGORY PAGE ---------- */
+function renderCustomCategory(catId) {
+  const cat = getCustomCategories().find(c => c.id === catId);
+  if (!cat) return;
+  document.getElementById('pageTitle').textContent = cat.name;
+  const cases = getCases(catId);
+
+  document.getElementById('content').innerHTML = `
+    <div class="flex items-center justify-between mb-16">
+      <div class="section-title">${cat.icon} ${escHtml(cat.name)} <small>${cases.length} cases</small></div>
+      <button class="btn btn-primary" onclick="openNewCase('${catId}')">+ New Case</button>
+    </div>
+    ${cases.length === 0
+      ? emptyState(cat.icon, 'No cases yet', 'Click + New Case to add one')
+      : `<div class="case-list">${cases.map(c => renderCaseRow(c, 'openCaseById')).join('')}</div>`}
+  `;
 }

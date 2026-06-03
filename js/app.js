@@ -223,6 +223,7 @@ function localLogout() {
 function onLocalAuthReady() {
   const user = LOCAL_AUTH.currentUser;
   hideLoginScreen();
+  refreshSidebarCategories();
   // Update sidebar user info
   const userInfo = document.getElementById('authUserInfo');
   if (userInfo) {
@@ -284,6 +285,17 @@ function renderAdminPanel() {
           <button class="btn btn-secondary btn-sm" onclick="clearSharedSheet()">Clear</button>
           <button class="btn btn-primary btn-sm" onclick="saveSharedSheet()">💾 Save Sheet ID</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Custom Categories -->
+    <div class="card mb-24">
+      <div class="card-header">
+        <div class="card-title">📁 Custom Categories</div>
+        <button class="btn btn-primary btn-sm" onclick="openAddCategory()">+ Add Category</button>
+      </div>
+      <div class="card-body" style="padding-bottom:8px" id="customCatList">
+        ${renderCustomCategoryList()}
       </div>
     </div>
 
@@ -399,6 +411,190 @@ function saveUser(existingId = '') {
   saveLocalUsers(users);
   showToast('User saved!', 'success');
   closeContactModalBtn();
+  renderAdminPanel();
+}
+
+/* ======================================================
+   CUSTOM CATEGORY MANAGEMENT
+   ====================================================== */
+function renderCustomCategoryList() {
+  const cats = getCustomCategories();
+  if (cats.length === 0) return '<div class="text-sm text-muted" style="padding:8px 0">No custom categories yet. Click + Add Category to create one.</div>';
+  return cats.map(cat => `
+    <div class="admin-user-card" style="flex-direction:column;align-items:stretch">
+      <div class="flex items-center gap-12 mb-8">
+        <span style="font-size:22px">${cat.icon}</span>
+        <div style="flex:1">
+          <div class="fw-600">${escHtml(cat.name)}</div>
+          <div class="text-xs text-muted">${(cat.statuses||[]).length} statuses • ${getLabelDefs(cat.id).length} labels</div>
+        </div>
+        <div class="flex gap-8">
+          <button class="btn btn-secondary btn-sm" onclick="openEditCategory('${cat.id}')">✏ Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteCatConfirm('${cat.id}')">🗑</button>
+        </div>
+      </div>
+      <!-- Statuses -->
+      <div style="background:var(--bg);border-radius:8px;padding:8px 10px;margin-bottom:6px">
+        <div class="text-xs fw-600 text-muted mb-6">STATUSES</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">
+          ${(cat.statuses||[]).map(s => `
+            <div style="display:flex;align-items:center;gap:4px;background:#fff;border:1px solid var(--border);border-radius:16px;padding:3px 10px;font-size:11px">
+              <span>${s.n}. ${escHtml(s.label)}</span>
+              <button onclick="editCatStatus('${cat.id}',${s.n},'${escHtml(s.label)}')" style="background:none;border:none;cursor:pointer;font-size:10px;color:var(--blue)">✏</button>
+              <button onclick="deleteCatStatus('${cat.id}',${s.n})" style="background:none;border:none;cursor:pointer;font-size:10px;color:var(--red)">✕</button>
+            </div>`).join('')}
+        </div>
+        <div class="flex gap-6">
+          <input class="form-control" id="newstat_${cat.id}" placeholder="New status name..." style="font-size:12px" />
+          <button class="btn btn-secondary btn-sm" onclick="addCatStatus('${cat.id}')">+ Add</button>
+        </div>
+      </div>
+      <!-- Labels -->
+      <div style="background:var(--bg);border-radius:8px;padding:8px 10px">
+        <div class="text-xs fw-600 text-muted mb-6">LABELS</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">
+          ${getLabelDefs(cat.id).map(l => `
+            <div style="display:flex;align-items:center;gap:4px;background:#fff;border:1px solid var(--border);border-radius:16px;padding:3px 10px;font-size:11px">
+              <span>${escHtml(l.id !== l.label ? l.id+' — '+l.label : l.label)}</span>
+              <button onclick="deleteCatLabel('${cat.id}','${l.id}')" style="background:none;border:none;cursor:pointer;font-size:10px;color:var(--red)">✕</button>
+            </div>`).join('')}
+        </div>
+        <div class="flex gap-6">
+          <input class="form-control" id="newlbl_${cat.id}" placeholder="New label name..." style="font-size:12px" />
+          <button class="btn btn-secondary btn-sm" onclick="addCatLabel('${cat.id}')">+ Add</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function openAddCategory() {
+  document.getElementById('contactModalTitle').textContent = '📁 New Category';
+  document.getElementById('contactModalBody').innerHTML = `
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Category Name *</label>
+        <input class="form-control" id="cat_name" placeholder="e.g. VIP Clients" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Icon (emoji)</label>
+        <input class="form-control" id="cat_icon" placeholder="📁" value="📁" style="font-size:20px" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Color</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${['#007AFF','#34C759','#FF9500','#FF3B30','#AF52DE','#5AC8FA','#FF2D55','#FFCC00'].map(col =>
+          `<div onclick="document.getElementById('cat_color').value='${col}'" style="width:28px;height:28px;background:${col};border-radius:50%;cursor:pointer;border:2px solid transparent" onmouseover="this.style.border='2px solid #000'" onmouseout="this.style.border='2px solid transparent'"></div>`
+        ).join('')}
+        <input type="color" class="form-control" id="cat_color" value="#007AFF" style="width:60px;height:34px;padding:2px" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Initial Statuses (one per line)</label>
+      <textarea class="form-control" id="cat_statuses" rows="4" placeholder="Step 1&#10;Step 2&#10;Step 3"></textarea>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeContactModalBtn()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveNewCategory()">Create Category</button>
+    </div>`;
+  openModal('contactModal');
+}
+
+function saveNewCategory() {
+  const name = document.getElementById('cat_name')?.value?.trim();
+  if (!name) { showToast('Category name required', 'error'); return; }
+  const icon = document.getElementById('cat_icon')?.value?.trim() || '📁';
+  const color = document.getElementById('cat_color')?.value || '#007AFF';
+  const statusText = document.getElementById('cat_statuses')?.value || '';
+  const statuses = statusText.split('\n').map(l => l.trim()).filter(Boolean).map((label, i) => ({ n: i + 1, label }));
+  const bg = color + '20'; // 20 = ~12% opacity hex
+  createCustomCategory({ name, icon, color, bg, statuses });
+  showToast(`Category "${name}" created!`, 'success');
+  playSuccess();
+  closeContactModalBtn();
+  renderAdminPanel();
+}
+
+function openEditCategory(catId) {
+  const cat = getCustomCategories().find(c => c.id === catId);
+  if (!cat) return;
+  document.getElementById('contactModalTitle').textContent = '✏ Edit Category';
+  document.getElementById('contactModalBody').innerHTML = `
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Name *</label>
+        <input class="form-control" id="cat_name" value="${escHtml(cat.name)}" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Icon</label>
+        <input class="form-control" id="cat_icon" value="${escHtml(cat.icon)}" style="font-size:20px" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Color</label>
+      <input type="color" class="form-control" id="cat_color" value="${escHtml(cat.color||'#007AFF')}" style="width:80px;height:36px;padding:2px" />
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeContactModalBtn()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveCategoryEdit('${catId}')">Save</button>
+    </div>`;
+  openModal('contactModal');
+}
+
+function saveCategoryEdit(catId) {
+  const name = document.getElementById('cat_name')?.value?.trim();
+  if (!name) { showToast('Name required', 'error'); return; }
+  const icon = document.getElementById('cat_icon')?.value?.trim() || '📁';
+  const color = document.getElementById('cat_color')?.value || '#007AFF';
+  updateCustomCategory(catId, { name, icon, color, bg: color + '20' });
+  showToast('Category updated!', 'success');
+  closeContactModalBtn();
+  renderAdminPanel();
+}
+
+async function deleteCatConfirm(catId) {
+  const cat = getCustomCategories().find(c => c.id === catId);
+  const ok = await showConfirm('Delete Category', `Delete "${cat?.name}"? Cases in this category will not be deleted but won't appear here.`, 'Delete');
+  if (!ok) return;
+  deleteCustomCategory(catId);
+  showToast('Category deleted', 'info');
+  renderAdminPanel();
+}
+
+function addCatStatus(catId) {
+  const input = document.getElementById(`newstat_${catId}`);
+  const label = input?.value?.trim();
+  if (!label) { showToast('Enter a status name', 'error'); return; }
+  addStatusToCustomCategory(catId, label);
+  showToast('Status added!', 'success');
+  input.value = '';
+  renderAdminPanel();
+}
+
+function editCatStatus(catId, statusN, currentLabel) {
+  const newLabel = prompt(`Rename status "${currentLabel}":`, currentLabel);
+  if (!newLabel || newLabel.trim() === currentLabel) return;
+  updateStatusInCustomCategory(catId, statusN, newLabel.trim());
+  renderAdminPanel();
+}
+
+function deleteCatStatus(catId, statusN) {
+  removeStatusFromCustomCategory(catId, statusN);
+  renderAdminPanel();
+}
+
+function addCatLabel(catId) {
+  const input = document.getElementById(`newlbl_${catId}`);
+  const val = input?.value?.trim();
+  if (!val) { showToast('Enter a label name', 'error'); return; }
+  addCustomLabel(catId, { label: val });
+  showToast('Label added!', 'success');
+  input.value = '';
+  renderAdminPanel();
+}
+
+function deleteCatLabel(catId, labelId) {
+  deleteCustomLabel(catId, labelId);
   renderAdminPanel();
 }
 

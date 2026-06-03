@@ -1214,6 +1214,23 @@ textarea.form-control { resize: vertical; min-height: 80px; }
   content: ''; flex: 1; height: 1px; background: var(--border);
 }
 
+/* ======== EDITABLE STATUS STEP ======== */
+.step-label-row {
+  display: flex; align-items: center; gap: 4px;
+}
+.step-edit-btn {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.status-step:hover .step-edit-btn { opacity: 0.6 !important; }
+.step-edit-btn:hover { opacity: 1 !important; color: var(--blue); }
+
+/* ======== CUSTOM CATEGORY FORM ======== */
+.checkbox-wrap:hover {
+  border-color: var(--blue) !important;
+  background: var(--blue-light) !important;
+}
+
 /* ======== USERNAME / PASSWORD LOGIN ======== */
 .login-tabs {
   display: flex; gap: 4px;

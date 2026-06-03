@@ -102,6 +102,7 @@ async function onAuthReady() {
 
   // Hide login, show app
   hideLoginScreen();
+  if (typeof refreshSidebarCategories === 'function') refreshSidebarCategories();
   renderCurrentPage();
   updateBadges();
   updateAuthUI();
