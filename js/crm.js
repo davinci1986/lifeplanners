@@ -730,6 +730,8 @@ function importCRMExcel() {
 function handleCRMImportFile(input) {
   const file = input.files[0];
   if (!file) return;
+  // JSON files are handled by enrichFromALPPFile — skip Excel processing
+  if (file.name.endsWith('.json') || file.type === 'application/json') return;
   const reader = new FileReader();
   reader.onload = (e) => {
     try {
