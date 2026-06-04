@@ -4,15 +4,6 @@
 
 let recruitFilter = { status: 'all' };
 
-const RECRUIT_STATUSES = [
-  { n: 1, label: 'Approached' },
-  { n: 2, label: 'Fact-Finding' },
-  { n: 3, label: 'Recruitment Closing Appointment' },
-  { n: 4, label: 'Candidate Consider' },
-  { n: 5, label: 'Candidate Agreed' },
-  { n: 6, label: 'Candidate KIV' }
-];
-
 // Reasons for status 4 choices
 const CONSIDER_REASONS = {
   agreed:      { label: '✅ Candidate Agreed',                    next: 5, kivReason: null },
@@ -25,6 +16,7 @@ function renderRecruitment() {
   document.getElementById('pageTitle').textContent = 'Recruitment';
   const cases = getCases('recruitment');
   const stats = getCategoryStats('recruitment');
+  const statusDefs = getStatusDef('recruitment');
   const filtered = cases.filter(c => {
     if (recruitFilter.status !== 'all' && c.currentStatus !== recruitFilter.status) return false;
     return true;
@@ -33,15 +25,15 @@ function renderRecruitment() {
   document.getElementById('content').innerHTML = `
     <div class="stats-grid mb-20">
       <div class="stat-card"><div class="stat-icon" style="background:#F3E8FD">👥</div><div class="stat-num" style="color:var(--purple)">${cases.length}</div><div class="stat-label">Total Prospects</div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:#FFF3E0">⏳</div><div class="stat-num" style="color:var(--orange)">${cases.filter(c=>c.currentStatus===4).length}</div><div class="stat-label">Considering</div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:#E8F8EE">🤝</div><div class="stat-num" style="color:var(--green)">${cases.filter(c=>c.currentStatus===5).length}</div><div class="stat-label">Agreed</div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:#FFF3E0">⏳</div><div class="stat-num" style="color:var(--orange)">${cases.filter(c=>(c.completedSteps||[]).includes(4)&&!(c.completedSteps||[]).includes(5)&&!(c.completedSteps||[]).includes(6)).length}</div><div class="stat-label">Considering</div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:#E8F8EE">🤝</div><div class="stat-num" style="color:var(--green)">${cases.filter(c=>(c.completedSteps||[]).includes(5)).length}</div><div class="stat-label">Agreed</div></div>
       <div class="stat-card"><div class="stat-icon" style="background:var(--yellow-light)">📌</div><div class="stat-num" style="color:#B8860B">${stats.kivCount}</div><div class="stat-label">KIV</div></div>
     </div>
 
     <div class="flex items-center justify-between mb-12" style="flex-wrap:wrap;gap:8px">
       <div class="filter-bar" style="margin-bottom:0;flex-wrap:wrap">
         <span class="filter-chip ${recruitFilter.status==='all'?'active':''}" onclick="setRecruitFilter('status','all')">All</span>
-        ${RECRUIT_STATUSES.map(s => `<span class="filter-chip ${recruitFilter.status==s.n?'active':''}" onclick="setRecruitFilter('status',${s.n})">${s.label}</span>`).join('')}
+        ${statusDefs.map(s => `<span class="filter-chip ${recruitFilter.status==s.n?'active':''}" onclick="setRecruitFilter('status',${s.n})">${s.label}</span>`).join('')}
       </div>
       <button class="btn btn-primary" onclick="openNewCase('recruitment')">+ New Prospect</button>
     </div>
@@ -73,7 +65,15 @@ function openRecruitCase(id) {
 
 function renderRecruitDetail(c, contact) {
   const allRems = (DB.reminders || []).filter(r => r.caseId === c.id && !r.done);
-  const statusDefs = RECRUIT_STATUSES;
+  const statusDefs = getStatusDef('recruitment');
+  const completedSteps = c.completedSteps || [];
+  const undone = statusDefs.map(s => s.n).filter(n => !completedSteps.includes(n));
+  const nextStep = undone[0] ?? null;
+
+  const hasDecision = completedSteps.includes(4) || completedSteps.includes(5) || completedSteps.includes(6);
+  const isAgreed = completedSteps.includes(5) && !completedSteps.includes(6);
+  const isKIV = completedSteps.includes(6);
+  const allDone = statusDefs.every(s => completedSteps.includes(s.n));
 
   return `
     <div class="tab-bar">
@@ -87,6 +87,10 @@ function renderRecruitDetail(c, contact) {
     <!-- Progress Tab -->
     <div id="tab-progress">
       <div class="flex items-center justify-between mb-12" style="flex-wrap:wrap;gap:8px">
+        <div>
+          ${c.priority ? '<span class="priority-tag mb-8" style="display:inline-flex">★ Priority</span>' : ''}
+          ${c.kiv ? '<span class="status-badge kiv ml-4">KIV</span>' : ''}
+        </div>
         <div class="flex gap-8">
           <button class="btn btn-secondary btn-sm" onclick="togglePriority('${c.id}')">
             ${c.priority ? '★ Unmark Priority' : '☆ Mark Priority'}
@@ -94,39 +98,29 @@ function renderRecruitDetail(c, contact) {
           <button class="btn btn-secondary btn-sm" onclick="editCase('${c.id}')">✏ Edit</button>
           <button class="btn btn-danger btn-sm" onclick="deleteCaseConfirm('${c.id}')">🗑</button>
         </div>
-        <button class="btn-reminder-quick" onclick="openQuickReminder('${c.id}','${escHtml(c.contactName)}','recruitment','${escHtml(getStatusLabel('recruitment',c.currentStatus))}')">
-          🔔 Quick Reminder
-        </button>
       </div>
 
       <div class="status-steps">
         ${statusDefs.map(s => {
-          let cls = 'future';
-          if (s.n < c.currentStatus) cls = 'done-step';
-          else if (s.n === c.currentStatus) cls = 'current';
+          const isDone = completedSteps.includes(s.n);
+          const isCurrent = !isDone && s.n === nextStep;
           const hist = (c.statusHistory || []).filter(h => h.toStatus === s.n).pop();
-          return `
-            <div class="status-step ${cls}" onclick="setStatusFromStep('${c.id}',${s.n})">
-              <div class="step-circle">${cls === 'done-step' ? '✓' : s.n}</div>
-              <div class="step-info">
-                <div class="step-label">${escHtml(s.label)}</div>
-                ${c.category === 'recruitment' && s.n === 6 && c.customFields?.kivReason ?
-                  `<div class="step-remark">Reason: ${escHtml(c.customFields.kivReason)}</div>` : ''}
-                ${hist ? `<div class="step-date">${formatDate(hist.date)}</div>` : ''}
-                ${hist?.remark ? `<div class="step-remark">${escHtml(hist.remark)}</div>` : ''}
-              </div>
-              ${s.n === c.currentStatus ? `
-                <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();openQuickReminder('${c.id}','${escHtml(c.contactName)}','recruitment','${escHtml(s.label)}')">🔔</button>
-              ` : ''}
-            </div>`;
+          const customLabel = c.customStatusLabels?.[s.n] || s.label;
+          const extraContent = (s.n === 6 && c.customFields?.kivReason)
+            ? `<div class="step-remark" style="padding:4px 0 0 44px">Reason: ${escHtml(c.customFields.kivReason)}</div>` : '';
+          return renderStatusStep(c, s, {
+            isDone, isCurrent, histEntry: hist,
+            onClickFn: `handleStepClick('${c.id}',${s.n},'${escHtml(customLabel)}')`,
+            extraContent
+          });
         }).join('')}
       </div>
 
-      <!-- STATUS 4: Candidate Consider — 4-way branch -->
-      ${c.currentStatus === 4 ? renderConsiderChoices(c) : ''}
+      <!-- After step 3: show decision choices if no outcome yet -->
+      ${completedSteps.includes(3) && !hasDecision ? renderConsiderChoices(c) : ''}
 
-      <!-- STATUS 5: Candidate Agreed — program selection -->
-      ${c.currentStatus >= 5 && c.currentStatus < 6 ? `
+      <!-- Step 5 agreed: program selection -->
+      ${isAgreed ? `
         <div class="section-divider">Programs Agreed</div>
         <div class="flex gap-8 mb-8" style="flex-wrap:wrap">
           ${['RintiZ', 'Next Gen Millionaire', 'Next Gen Leader'].map(prog => `
@@ -137,19 +131,14 @@ function renderRecruitDetail(c, contact) {
             </label>`).join('')}
         </div>` : ''}
 
-      <!-- STATUS 6: KIV — reactivate options -->
-      ${c.currentStatus === 6 ? renderKIVReactivate(c) : ''}
+      <!-- Step 6 KIV: reactivate -->
+      ${isKIV ? renderKIVReactivate(c) : ''}
 
-      <!-- Advance with remark (statuses 1, 2, 3 all get Next button) -->
-      ${c.currentStatus < 4 && c.currentStatus !== 6 ? `
-        <div class="card mt-16" style="background:var(--bg)">
-          <div class="card-body">
-            <div class="form-label">${c.currentStatus === 3 ? 'Move to Candidate Consider' : 'Add Remark & Advance'}</div>
-            <textarea class="form-control mb-8" id="remarkInput" rows="2" placeholder="Optional remark..."></textarea>
-            <div class="btn-row">
-              ${c.currentStatus > 1 ? `<button class="btn btn-secondary btn-sm" onclick="goBackStatus('${c.id}')">← Back</button>` : ''}
-              <button class="btn btn-primary btn-sm" onclick="advanceStatusWithRemark('${c.id}')">Next Step →</button>
-            </div>
+      ${allDone ? `
+        <div class="card mt-16" style="background:var(--green-light);border-color:var(--green)">
+          <div class="card-body text-center">
+            <div style="font-size:32px">🎉</div>
+            <div class="fw-600" style="color:var(--green)">All steps completed!</div>
           </div>
         </div>` : ''}
     </div>
@@ -237,7 +226,7 @@ function renderKIVReactivate(c) {
         <div class="fw-600 mb-8">📌 KIV ${reason ? `— ${reason}` : ''}</div>
         <div class="text-sm text-muted mb-12">Reactivate this candidate by moving them back to any stage:</div>
         <div class="flex gap-8" style="flex-wrap:wrap">
-          ${RECRUIT_STATUSES.filter(s => s.n < 6).map(s => `
+          ${getStatusDef('recruitment').filter(s => s.n < 6).map(s => `
             <button class="btn btn-secondary btn-sm" onclick="reactivateFromKIV('${c.id}',${s.n})">
               → ${s.label}
             </button>`).join('')}
@@ -250,33 +239,27 @@ function handleConsiderChoice(caseId, choiceKey) {
   const choice = CONSIDER_REASONS[choiceKey];
   if (!choice) return;
   const remark = document.getElementById('remarkInput')?.value || choice.label;
-  const c = setStatus(caseId, choice.next, remark);
+  const c = toggleStepDone(caseId, choice.next, remark, null);
   if (!c) return;
 
-  // Store KIV reason
   if (choice.kivReason) {
     updateCase(caseId, {
       kiv: true,
       customFields: { ...(c.customFields || {}), kivReason: choice.kivReason }
     });
-    // Set 3-day follow-up reminder
     addReminder({
       caseId, contactName: c.contactName, category: 'recruitment',
       title: `KIV Follow-up: ${choice.kivReason} — ${c.contactName}`,
-      date: workingDaysReminder(new Date(), 30) // 1 month follow-up for KIV
+      date: workingDaysReminder(new Date(), 30)
     });
     showToast(`Moved to KIV: ${choice.kivReason}`, 'warning');
   } else if (choice.next === 5) {
-    // Agreed → trigger onboarding
     checkAutoTransfer(c);
     showToast(`🎉 ${c.contactName} agreed! Moved to Onboarding.`, 'success');
     playComplete();
   }
 
-  // Set 3-day reminder for "Consider"
-  if (choiceKey === 'agreed') {
-    playSuccess();
-  }
+  if (choiceKey === 'agreed') playSuccess();
 
   closeCaseModalBtn();
   setTimeout(() => { openCaseById(caseId); updateBadges(); }, 50);
@@ -286,8 +269,17 @@ function handleConsiderChoice(caseId, choiceKey) {
 function reactivateFromKIV(caseId, targetStatus) {
   const c = getCase(caseId);
   if (!c) return;
-  updateCase(caseId, { kiv: false, customFields: { ...(c.customFields || {}), kivReason: '' } });
-  setStatus(caseId, targetStatus, 'Reactivated from KIV');
+  // Remove KIV step and any outcome steps (4/5/6) at or beyond targetStatus
+  const newSteps = (c.completedSteps || []).filter(n => n < targetStatus && n !== 6);
+  const maxStep = newSteps.length > 0 ? Math.max(...newSteps) : 0;
+  const histEntry = { fromStatus: 6, toStatus: targetStatus, remark: 'Reactivated from KIV', date: new Date().toISOString() };
+  updateCase(caseId, {
+    kiv: false,
+    customFields: { ...(c.customFields || {}), kivReason: '' },
+    completedSteps: newSteps,
+    currentStatus: maxStep,
+    statusHistory: [...(c.statusHistory || []), histEntry]
+  });
   showToast(`Reactivated to: ${getStatusLabel('recruitment', targetStatus)}`, 'success');
   playSuccess();
   closeCaseModalBtn();

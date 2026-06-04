@@ -527,12 +527,27 @@ function openSetStatusWithDate(caseId, stepN, stepLabel) {
 function confirmSetStatusWithDate(caseId, stepN) {
   const date = document.getElementById('ssd_date')?.value;
   const remark = document.getElementById('ssd_remark')?.value || '';
-  toggleStepDone(caseId, stepN, remark, date);
+  const updatedCase = toggleStepDone(caseId, stepN, remark, date);
+  if (updatedCase) checkStepAutoReminder(updatedCase, stepN);
   showToast('Step done! ✓', 'success');
   playSuccess();
   closeContactModalBtn();
   setTimeout(() => { openCaseById(caseId); updateBadges(); }, 50);
   renderCurrentPage();
+}
+
+function checkStepAutoReminder(c, stepN) {
+  const defs = getStatusDef(c.category);
+  const def = defs.find(d => d.n === stepN);
+  if (!def?.autoReminder) return;
+  const remDate = workingDaysReminder(new Date(), def.autoReminder);
+  addReminder({
+    caseId: c.id, contactId: c.contactId, contactName: c.contactName,
+    category: c.category,
+    title: `Follow up: ${def.label} — ${c.contactName}`,
+    date: remDate
+  });
+  showToast(`Reminder set for ${def.autoReminder} working days`, 'info');
 }
 
 /* ---------- SIDEBAR DYNAMIC CATEGORIES ---------- */
