@@ -2,78 +2,86 @@
 
 ## What Was Accomplished This Session
 
-### Major Features Built
-1. **Username/Password Login System** — local auth with `lp_users` in localStorage, default admin/admin, session via sessionStorage
-2. **Admin Panel** — user management (add/edit/delete with roles), centralized Google Sheet ID config
-3. **Sidebar Toggle Fix** — hamburger always visible on desktop; collapse/reopen now works
-4. **CRM IC → Birthday + Age** — type NRIC, DOB auto-fills + age shows in green
-5. **Recruitment Status 4 Fix** — advance button now shows at status 3; 4-way branch at status 4
-6. **Multi-Category Cases** — cases can belong to multiple categories simultaneously
-7. **Editable Status Step Labels** — pencil icon on every step, custom label per case, date picker
-8. **Date Picker on Every Status Step** — `openSetStatusWithDate()` replaces instant status setting
-9. **Custom Categories** — create in Admin Panel with icon, color, statuses, labels; appear in sidebar
-10. **Universal Status Step Renderer** — `renderStatusStep()` in utils.js (used by sales.js so far)
-11. **Reminder Button on Every Step** — 🔔 inline on all status steps
-12. **Custom Labels** — add new labels to any category from the new case form
-13. **Shared Google Sheet** — admin sets one Sheet ID, all users sync there
+### Major Features Built & Pushed to Live (commit ad8ee5e)
 
-### Bug Fixes
-- Fixed `navigateTo` recursive override (hoisting trap with duplicate function declarations)
-- Fixed sidebar reopen on desktop
+1. **Snapwill Customer Types** — Multi-select chip buttons (Will, Memories, Sub 199/299, Leader Account, Affiliate, Business Partner, School Donation, Booth). "+ Add" for custom types. Stored in `DB.settings.snapwillTypes` and `case.snapwillTypes[]`. Functions: `saveSnapwillTypes()`, `addNewSnapwillType()`, `getSnapwillTypes()`, `addSnapwillType()`.
 
-### Infrastructure
-- Set up proper git workflow (merge unrelated histories, push without force)
-- Updated GitHub Actions workflow to deploy from `./` instead of `./todo-dashboard/`
-- All changes live at https://davinci1986.github.io/lifeplanners/
+2. **Label ID Bug Fixed** — `addCustomLabel()` now deduplicates by text. `addLabelToCategory()` injects radio button + auto-selects it so `saveNewCase()` captures the correct ID (not raw text). `saveNewCase()` also resolves `labelCustom` text → ID via DB lookup.
+
+3. **AI Solution Module** — New `js/aisolution.js`. Fully custom per-case steps stored in `case.aiSteps[]`. Progress bar on list row. Inline step add/rename/delete. Date/remark on step completion. Functions: `renderAISolution()`, `openAISolutionCase()`, `handleAIStepClick()`, `addAIStepInline()`, `toggleAIStep()`, `renameAIStep()`, `deleteAIStep()` (in data.js).
+
+4. **To-Do List Progress Mode** — All status steps now work as independent checkboxes. `case.completedSteps[]` array stores done steps. `toggleStepDone()` in data.js. `handleStepClick()` in utils.js (entry point). `confirmSetStatusWithDate()` now calls `toggleStepDone()` instead of `setStatus()`. `renderCaseDetail()` in sales.js uses `completedSteps` for `isDone`/`isCurrent`. Branch buttons conditioned on `completedSteps.includes(N)`.
+
+5. **CRM Extended Fields** — 11 new fields in contact form + detail view: Race, Religion, Gender (data only, form missing!), Language, Stay Area, State, Marital Status, Dependants, Job Type, Monthly Income, Existing Insurance (multi-select array), Referral Source, Social Media, Tags. All dropdown options stored in `DB.settings.crmOptions` via `getCRMOptions()` + `addCRMOption()`. `createContact()` updated to include all fields.
+
+6. **Bulk WhatsApp Blast** — CRM "📱 Bulk WhatsApp" tab. 19 templates in 2 groups (`WA_TEMPLATE_GROUPS`). Filters: Gender, Race, Religion, Area, State, Marital, Job, Income, Tag, Age range, Insurance (multi-select). Quick Select: 3 groups (By Occasion 10, By Profile 10, By Insurance 3). `generateWALinks()` produces personalised wa.me links.
+
+7. **Excel Export** — `js/export.js` with `exportToExcel()`. SheetJS CDN v0.20.3. 6 sheets: Summary, Contacts (25 fields), Cases, Activity History, Reminders, AI Solution. "📥 Export Excel" button in CRM header.
+
+8. **Admin: Built-in Category Step Editor** — New card in Admin Panel. Expand/collapse per category. Rename/add/remove steps. Global overrides via `DB.globalStatusDefs`. `getStatusDef()` checks these first. Reset to Default button.
+
+9. **Insurance Multi-Select in Bulk WhatsApp** — `_blastFilter.insuranceFilter` is an array. Checkbox chips for each company + "No Insurance" option. OR logic filter. `blastToggleInsurance()` function.
+
+10. **Extended WA Templates & Quick Select** — Added Christmas, Wesak, Raya Haji, Merdeka, Critical Illness, Medical Card, Retirement Planning, Mortgage Protection, Education Planning. Quick Select expanded to 3 organized groups.
 
 ---
 
 ## Major Decisions Made
 
-1. **Local auth takes priority over Google auth** — `localAuthInit()` runs first; Google is fallback
-2. **`LOCAL_AUTH` declared at top of app.js** — must be before `navigateTo` which references it
-3. **`renderStatusStep()` is the new universal renderer** — all modules should migrate to it
-4. **Custom categories stored in `DB.customCategories`** — part of main DB, syncs to Sheets
-5. **Workflow deploys from `./` root** — repo root = app root (no subfolder indirection)
+1. **To-do mode uses `completedSteps[]` + `currentStatus` = max done** — backward compatible display
+2. **`existingInsurance` changed to array** — always `Array.isArray()` check
+3. **`insuranceFilter` in `_blastFilter` is array `[]`** not string — unique among filter fields
+4. **`confirmSetStatusWithDate()` now calls `toggleStepDone()`** — replaces `setStatus()` for step clicks
+5. **`WA_TEMPLATE_GROUPS` + flat `WA_TEMPLATES`** — both maintained for grouped UI + template lookup
+6. **Gender field in data but not in form** — known gap, needs fixing next session
+7. **SheetJS via CDN** — no install, loaded before all scripts in index.html
+
+---
+
+## Current Project Status
+
+- **Overall Completion:** ~88%
+- **All changes pushed to live** — commit ad8ee5e, GitHub Pages deployment complete
+- **Live URL:** https://davinci1986.github.io/lifeplanners/
 
 ---
 
 ## Current Blockers
 
-None blocking. The following items were **interrupted mid-session** and must be done next:
-
-1. Snapwill customer types (Will, Memories, Subscription 199/299, Leader, Affiliate, etc.)
-2. Label ID bug fix in `saveNewCase()` / `addLabelToCategory()`
-3. "AI Solution" category (tailor-made, fully flexible)
-4. All progress steps → to-do list mode (no forced sequence, multi-select)
-5. Migrate claims.js, servicing.js, recruitment.js to use `renderStatusStep()`
+1. **Gender field missing from CRM contact form** — data structure ready, form field not added
+2. **claims.js, servicing.js, recruitment.js** — still use old linear step rendering; to-do mode not applied
+3. **Google Sheets scope** — unverified if spreadsheets scope enabled in Google Cloud Console
 
 ---
 
 ## Immediate Next Task
 
-**Fix the label bug first** — it's a quick win and affects all users:
+**Fix gender field in CRM contact form** — 10-minute fix:
 
-In `js/sales.js` → `saveNewCase()`:
+In `crm.js` → `renderContactForm()`, add to the extended fields section:
 ```js
-// Current (broken): always creates new label
-const labelCustom = document.getElementById('nf_custom_label')?.value?.trim();
-const label = labelRadio?.value || labelCustom || '';
+// In the first form-row after race/religion:
+${renderCRMDropdown('cf_gender', 'genders', contact?.gender || '', 'Gender')}
 ```
 
-The fix: when `labelCustom` is typed and the user clicked `addLabelToCategory()`, the label was already saved with a `uid()`. When `saveNewCase()` runs, it just uses the text string. That's fine for the case — the bug is that the SAME text typed again creates a DUPLICATE entry in `DB.customLabels[category]`. Fix: in `addLabelToCategory()`, check for duplicate labels before adding.
+In `crm.js` → `saveContact()`, add:
+```js
+gender: document.getElementById('cf_gender')?.value || '',
+```
+
+`DEFAULT_CRM_OPTIONS.genders` already has `['Male', 'Female', 'Non-binary', 'Prefer not to say']` in data.js. `createContact()` already has `gender: data.gender || ''`. Just the form field is missing.
 
 ---
 
 ## Recommended Development Order for Next Session
 
-1. Fix label duplicate/ID bug
-2. Snapwill customer types multi-select
-3. AI Solution flexible category
-4. Progress to-do list mode (all modules)
-5. Migrate remaining modules to `renderStatusStep()`
-6. Team Dashboard flesh out
-7. Google Sheets real-time sync
-8. Password hashing
-9. PWA manifest
-10. Bulk contact import
+1. Fix gender field in CRM contact form (quick win, 10 min)
+2. Migrate claims.js to use `renderStatusStep()` + `completedSteps` to-do mode
+3. Migrate servicing.js to use `renderStatusStep()` + `completedSteps` to-do mode
+4. Migrate recruitment.js to use `renderStatusStep()` + `completedSteps` to-do mode
+5. Team Dashboard flesh out (hierarchy view, agent stats)
+6. PWA manifest + service worker for mobile install
+7. Password hashing
+8. Google Sheets real-time sync
+9. Bulk contact import from Excel
+10. Policy Summary PDF generation
