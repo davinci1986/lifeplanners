@@ -40,6 +40,7 @@ function renderCRM() {
         ${renderCRMViewToggle()}
         <div style="margin-left:auto;display:flex;gap:8px">
           <button class="btn btn-secondary" onclick="importCRMExcel()" title="Import contacts from Excel / CSV">📤 Import</button>
+          <button class="btn btn-secondary" onclick="enrichFromALPPFile()" title="Enrich contacts with ALPP policy detail data (phone, email, NRIC, DOB, employer...)">🔄 ALPP Enrich</button>
           <button class="btn btn-secondary" onclick="exportToExcel()" title="Export all CRM data to Excel">📥 Export</button>
           <button class="btn btn-primary" onclick="openNewContact()">+ New Contact</button>
         </div>
@@ -330,6 +331,8 @@ function renderContactDetail(contact, cases) {
     ${fieldRow('Marital Status', contact.maritalStatus)}
     ${fieldRow('Dependants', contact.dependants !== undefined && contact.dependants !== '' ? contact.dependants + ' person(s)' : null)}
     ${fieldRow('Occupation', contact.occupation)}
+    ${fieldRow('Employer', contact.employer)}
+    ${fieldRow('Nationality', contact.nationality)}
     ${fieldRow('Job Type', contact.jobType)}
     ${fieldRow('Monthly Income', contact.income)}
     ${fieldRow('Language Preference', contact.langPref)}
@@ -500,6 +503,16 @@ function renderContactForm(contact = null) {
         ${renderCRMDropdown('cf_jobtype', 'jobTypes', contact?.jobType || '', 'Job Type')}
       </div>
       <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Name of Employer</label>
+          <input class="form-control" id="cf_employer" value="${v('employer')}" placeholder="Company / employer name..." />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Nationality</label>
+          <input class="form-control" id="cf_nationality" value="${v('nationality')}" placeholder="e.g. Malaysian" />
+        </div>
+      </div>
+      <div class="form-row">
         ${renderCRMDropdown('cf_income', 'incomes', contact?.income || '', 'Monthly Income')}
       </div>
       <!-- Existing Insurance — multi-select -->
@@ -552,7 +565,7 @@ function renderContactForm(contact = null) {
 
 function hasExtendedFields(contact) {
   const ins = Array.isArray(contact.existingInsurance) ? contact.existingInsurance.length > 0 : !!contact.existingInsurance;
-  return !!(contact.gender || contact.race || contact.religion || contact.stayArea || contact.maritalStatus || contact.jobType || contact.income || contact.langPref || ins || contact.referralSource || contact.socialMedia || contact.tags?.length);
+  return !!(contact.gender || contact.race || contact.religion || contact.stayArea || contact.maritalStatus || contact.jobType || contact.income || contact.langPref || ins || contact.referralSource || contact.socialMedia || contact.tags?.length || contact.employer || contact.nationality);
 }
 
 function toggleCRMExtras() {
@@ -605,6 +618,8 @@ function saveContact(existingId = '') {
     email:            document.getElementById('cf_email')?.value || '',
     nric, dob,
     occupation:       document.getElementById('cf_occ')?.value || '',
+    employer:         document.getElementById('cf_employer')?.value || '',
+    nationality:      document.getElementById('cf_nationality')?.value || '',
     notes:            document.getElementById('cf_notes')?.value || '',
     race:             document.getElementById('cf_race')?.value || '',
     stayArea:         document.getElementById('cf_area')?.value || '',
@@ -690,6 +705,8 @@ const CRM_IMPORT_COL_MAP = {
   stayArea:        ['area','stay area','city','bandar','kawasan','location'],
   maritalStatus:   ['marital status','marital','status kahwin','status perkahwinan'],
   occupation:      ['occupation','job','profession','pekerjaan','jawatan'],
+  employer:        ['employer','name of employer','company','syarikat','majikan'],
+  nationality:     ['nationality','warganegara','kerakyatan'],
   jobType:         ['job type','employment type','jenis pekerjaan','employment'],
   income:          ['income','monthly income','pendapatan','salary','gaji'],
   langPref:        ['language','lang','language preference','bahasa','bahasa pilihan'],
@@ -1324,4 +1341,124 @@ function copyAllPhones() {
   } else {
     showToast('Copy not supported in this browser', 'warning');
   }
+}
+
+/* ============================================
+   ALPP ENRICHMENT IMPORT
+   ============================================
+   Reads alpp_enriched_*.json produced by alpp_scraper.js
+   Matches contacts by owner name (case-insensitive)
+   Only fills EMPTY fields — never overwrites existing data
+   ============================================ */
+
+function enrichFromALPPFile() {
+  // Reuse the hidden file input — set accept to JSON only
+  const input = document.getElementById('crmImportInput');
+  if (!input) { showToast('File input not found', 'error'); return; }
+  input.accept = '.json,application/json';
+  input.onchange = (e) => {
+    input.accept = '.xlsx,.xls,.csv'; // reset for normal imports
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const raw = JSON.parse(ev.target.result);
+        const arr = Array.isArray(raw) ? raw : (Array.isArray(raw.value) ? raw.value : null);
+        if (!arr) { showToast('Invalid ALPP JSON format', 'error'); return; }
+        processALPPEnrichment(arr);
+      } catch(err) {
+        showToast('Could not parse JSON: ' + err.message, 'error');
+      }
+    };
+    reader.readAsText(file);
+    input.value = '';
+  };
+  input.click();
+}
+
+function processALPPEnrichment(records) {
+  if (!records || records.length === 0) {
+    showToast('No records in file', 'warning');
+    return;
+  }
+
+  // Build a deduplicated map: ownerName (uppercase) → best record
+  // "Best" = the one with the most non-empty enrichment fields
+  const ownerMap = {};
+  for (const rec of records) {
+    const key = (rec.owner || '').toUpperCase().trim();
+    if (!key || key === 'MONTHLY') continue; // skip bad entries
+    const score = [rec.phone, rec.email, rec.nric, rec.dob, rec.gender, rec.occupation, rec.employer, rec.nationality].filter(Boolean).length;
+    if (!ownerMap[key] || score > ownerMap[key]._score) {
+      ownerMap[key] = { ...rec, _score: score };
+    }
+  }
+
+  const contacts = getContacts();
+  let updated = 0;
+  let fieldsAdded = 0;
+  let notFound = [];
+
+  // Fields that can be enriched (only filled if currently empty)
+  const ENRICHABLE = ['phone','email','nric','dob','gender','occupation','employer','nationality'];
+
+  for (const [ownerKey, rec] of Object.entries(ownerMap)) {
+    // Match CRM contact by name — case-insensitive, also try stripping spaces
+    const contact = contacts.find(c => {
+      const cName = c.name.toUpperCase().trim();
+      return cName === ownerKey || cName.replace(/\s+/g,'') === ownerKey.replace(/\s+/g,'');
+    });
+
+    if (!contact) {
+      notFound.push(rec.owner);
+      continue;
+    }
+
+    const updates = {};
+    for (const field of ENRICHABLE) {
+      const alppVal = (rec[field] || '').trim();
+      const crmVal  = (contact[field] || '').trim();
+      if (alppVal && !crmVal) {
+        updates[field] = alppVal;
+        fieldsAdded++;
+      }
+    }
+
+    // Special: append ALPP policy note to notes (don't overwrite)
+    const policyNote = _buildPolicyNote(rec);
+    if (policyNote) {
+      const existing = (contact.notes || '').trim();
+      if (!existing.includes('AIA Policy')) {
+        updates.notes = existing ? existing + '\n' + policyNote : policyNote;
+        fieldsAdded++;
+      }
+    }
+
+    if (Object.keys(updates).length > 0) {
+      updateContact(contact.id, updates);
+      updated++;
+    }
+  }
+
+  // Show result
+  const notFoundCount = notFound.length;
+  const msg = `✅ Enriched ${updated} contacts, ${fieldsAdded} fields filled${notFoundCount > 0 ? `. ${notFoundCount} names not matched.` : '.'}`;
+  showToast(msg, updated > 0 ? 'success' : 'warning');
+
+  if (notFoundCount > 0) {
+    console.log('[ALPP Enrich] Not matched in CRM:', notFound);
+  }
+
+  if (typeof playSuccess === 'function') playSuccess();
+  renderCRM();
+}
+
+/** Build a compact policy note string from a scraper record */
+function _buildPolicyNote(rec) {
+  // rec.rawFields might have policy numbers — try to extract from owner's policies
+  // The policyNo in the record is just one of their policies
+  // We'll just note the scrape source
+  if (!rec.policyNo) return '';
+  return `AIA Policy: ${rec.policyNo}${rec.insured && rec.insured !== rec.owner ? ` (Insured: ${rec.insured})` : ''}`;
 }

@@ -71,6 +71,8 @@ function createContact(data) {
     nric: data.nric || '',
     dob: data.dob || '',
     occupation: data.occupation || '',
+    employer: data.employer || '',
+    nationality: data.nationality || '',
     notes: data.notes || '',
     tags: data.tags || [],
     // Extended CRM fields
@@ -133,6 +135,8 @@ function searchContacts(q) {
     if (has(c.religion))       return true;
     if (has(c.referralSource)) return true;
     if (has(c.socialMedia))    return true;
+    if (has(c.employer))       return true;
+    if (has(c.nationality))    return true;
     if (has(c.notes))          return true;
     // Tags / labels
     if ((c.tags || []).some(t => has(t)))                                                return true;
