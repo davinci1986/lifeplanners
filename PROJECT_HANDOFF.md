@@ -28,68 +28,46 @@ After push: GitHub Pages takes ~2 min. Users need Ctrl+Shift+R.
 
 ---
 
-## Current Status: ~85% Complete
+## Current Status: ~90% Complete
 
 ### ✅ Done
 - CRM contacts: 20+ fields, 4 view modes, filter bar, search, Excel import/export, Bulk WhatsApp
-- CRM: `employer` + `nationality` fields added (from ALPP enrichment)
-- CRM: `🔄 ALPP Enrich` button — reads scraper output JSON → updates empty fields
-- `alpp_scraper.js` — browser console scraper for ALPP policy detail pages
-- Sales cases: to-do mode (`completedSteps[]`)
-- Onboarding cases: to-do mode
+- CRM: `employer` + `nationality` fields (from ALPP enrichment)
+- CRM: `🔄 ALPP Enrich` — imports `alpp_enriched_*.json` → enriches existing OR creates new contacts
+- All case modules in **to-do mode**: Sales, Onboarding, Claims, Servicing, Recruitment
+- Auto-reminders fire correctly on step completion (`checkStepAutoReminder`)
 - Sound system: 12 Web Audio sounds
 - Glass design: backdrop-filter, neon gradients
+- ALPP Pass 1 complete: 199/199 policies scraped, 74 contacts created
 
-### ❌ Pending (priority order)
-1. **ALPP scraper completing** — 49/199 done, running in Chrome (see scraper state below)
-2. **Second pass** on 17 timed-out non-ILP policies
-3. **Migrate `claims.js`** to to-do mode (reference: `sales.js`)
-4. **Migrate `servicing.js`** to to-do mode
-5. **Migrate `recruitment.js`** to to-do mode
-6. **Team Dashboard** — hierarchy tree + per-agent stats
-7. **Dashboard charts** — pipeline bar chart, conversion rate
+### ⏳ In Progress
+- **ALPP Pass 2**: `alpp_scraper_pass2.js` — 93 non-ILP policies — user running now
+
+### ❌ Pending
+1. Team Dashboard — hierarchy tree + per-agent stats
+2. Dashboard charts — pipeline bar chart, conversion rate
 
 ---
 
 ## ALPP Scraper — Current State
 
-| Field | Value |
-|---|---|
-| Script | `alpp_scraper.js` (project root) |
-| localStorage key | `alpp_scrape_v3` (in Chrome tab on ALPP) |
-| Progress | 49/199 policies scraped |
-| Successes | 32 contacts with phone + email + NRIC + employer |
-| Errors | 17 (timeout on non-ILP policies) |
-| Output | `alpp_enriched_YYYY-MM-DD.json` (auto-downloads on completion) |
+### Pass 1 (COMPLETE)
+- Script: `alpp_scraper.js`
+- Result: 199/199 done · 106 successful · 93 errors (non-ILP timeout)
+- Imported: 74 new contacts created in CRM
 
-### Resume Instructions
-```
-If Chrome tab still open:
-  DevTools → Console → window._alppStatus  (check running state)
-  If stopped: paste alpp_scraper.js — auto-resumes from localStorage
+### Pass 2 (IN PROGRESS)
+- Script: `alpp_scraper_pass2.js` (project root)
+- Storage key: `alpp_scrape_pass2` (Chrome localStorage)
+- Target: 93 non-ILP/traditional policies
+- Output: `alpp_enriched_pass2_YYYY-MM-DD.json`
 
-If tab closed:
-  1. Login to https://www.alpp.aia.com.my
-  2. MY SERVICING → Policy Status Enquiry → A3719 → Inforce-Premium Paying → SUBMIT
-  3. Click OK on native confirm popup (manual)
-  4. Click any policy to open detail page
-  5. DevTools → Console → paste alpp_scraper.js
-```
+**Resume Pass 2:**
+1. Login ALPP → open any policy detail page
+2. F12 → Console → paste `alpp_scraper_pass2.js` → Enter (auto-resumes)
 
-### Timed-Out Policies (non-ILP — need second pass)
-```
-7005332A04, 7535986A10, 5523205A06, 4200336A05, 1087608A10, 5351468A02,
-0740117J09, 7763082A10, 4113349A02, 7164156A00, 7211229A05, 7260012A00,
-0040108J02, 5224270A04, 0825306J10, 7157497A10, 5159628A08
-```
-These are traditional (non-ILP) policies — different page layout, no `POLICY OWNER:` h5.
-Second pass extractor needs to find owner data without relying on that heading.
-
-### Import Into CRM
-After scraper completes: CRM → **🔄 ALPP Enrich** → select `alpp_enriched_*.json`
-- Matches by owner name (case-insensitive)
-- Only fills EMPTY fields (phone, email, nric, dob, gender, occupation, employer, nationality)
-- Never overwrites existing data
+**Import result:**
+- CRM → **🔄 ALPP Enrich** → select `alpp_enriched_pass2_*.json`
 
 ---
 
@@ -102,12 +80,11 @@ After scraper completes: CRM → **🔄 ALPP Enrich** → select `alpp_enriched_
 ```js
 {
   id, ownerEmail, name, phone, email, nric, dob, occupation,
-  employer,       // Name of Employer — from ALPP
-  nationality,    // from ALPP
+  employer, nationality,        // from ALPP
   notes, tags[],
   race, stayArea, state, maritalStatus, dependants,
   jobType, income, langPref, gender, religion,
-  existingInsurance[],  // ⚠️ ALWAYS ARRAY — Array.isArray() before any use
+  existingInsurance[],          // ⚠️ ALWAYS ARRAY
   referralSource, socialMedia, createdAt, updatedAt
 }
 ```
@@ -118,8 +95,8 @@ After scraper completes: CRM → **🔄 ALPP Enrich** → select `alpp_enriched_
   id, ownerEmail, contactId, contactName,
   category,          // sales|claims|servicing|recruitment|onboarding|snapwill|aisolution|others
   label, subLabel,
-  currentStatus,     // int — max(completedSteps) in to-do mode
-  completedSteps[],  // int[] — to-do mode only
+  currentStatus,     // int — max(completedSteps)
+  completedSteps[],  // int[] — to-do mode (ALL modules)
   statusHistory[],   // [{fromStatus, toStatus, remark, date}]
   customStatusLabels{}, remarks, reminders[], priority, kiv, followUp,
   premiums[], examinations[], recruitPrograms[], fieldwork[],
@@ -141,32 +118,30 @@ Ask Receipts → Pending Submission → Submitted (autoReminder 7d) → Checked 
 Fill Forms → Send Link → Reminder to Approve → Check Status (autoReminder 7d) → Pending Memo → Send Requirement → Submit Memo → Pending Memo Follow-Up (autoReminder 7d) → Status Approved
 
 ### Recruitment (6 steps)
-Approached → Fact-Finding → Closing Appointment → Candidate Consider (autoReminder 3d, repeat) → Candidate Agreed → Candidate KIV
+Approached → Fact-Finding → Closing Appointment → Candidate Consider (autoReminder 3d) → Candidate Agreed → Candidate KIV
 
 ### Onboarding (9 steps)
 Key in BALP (autoReminder 90d) → Arrange Exam → 20 Names Hotlist (autoReminder 5d) → Training → Policy Review → Fieldwork → Fieldwork Closed → Exam Complete → Completed
 
 ---
 
-## To-Do Mode (Sales, Onboarding)
+## To-Do Mode (all modules)
 
 ```
-renderStatusStep(cs, stepDef, caseId)
+renderStatusStep(cs, stepDef, options)
   stepDef.n in cs.completedSteps[]?
-    YES → green checked row
-    NO  → checkbox → confirmSetStatusWithDate()
+    YES → green checked row → click unchecks via handleStepClick
+    NO  → click → openSetStatusWithDate → confirmSetStatusWithDate
               → toggleStepDone(caseId, stepN, remark, date)
                   → toggles completedSteps[]
                   → currentStatus = Math.max(...completedSteps)
-
-⚠️ confirmSetStatusWithDate() MUST call toggleStepDone() — NOT setStatus()
+                  → checkStepAutoReminder() fires if step has autoReminder
 ```
 
-## Linear Mode (Claims, Servicing, Recruitment — needs migration)
-```
-"Next Step" button → advanceCaseStatus(id) → currentStatus += 1
-// completedSteps[] not used
-```
+**Recruitment branch (after step 3):**
+- `renderConsiderChoices` → `handleConsiderChoice` → `toggleStepDone` for step 4/5/6
+- Step 5 (Agreed) → `checkAutoTransfer` → creates onboarding case
+- Step 6 (KIV) → `reactivateFromKIV` removes step 6 from completedSteps
 
 ---
 
@@ -182,6 +157,7 @@ renderStatusStep(cs, stepDef, caseId)
 | `updateSoundBtn()` | Called from `localLogin()` only — not `loadDB()`. |
 | Git branch | Local `master` → remote `main`. Push: `master:main`. |
 | Working dir | `C:\Users\Keith\todo-dashboard\` — NOT nested copy. |
+| ALPP JSON import | `handleCRMImportFile` skips `.json` files (Excel-only handler) |
 
 ---
 

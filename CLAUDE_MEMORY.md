@@ -6,7 +6,7 @@
 1. existingInsurance  → ALWAYS ARRAY. Array.isArray() before any use.
 2. confirmSetStatusWithDate() → toggleStepDone() NOT setStatus()
 3. _blastFilter.insuranceFilter → [] not ''
-4. claims/servicing/recruitment → OLD linear mode, no to-do logic yet
+4. All case modules now in to-do mode (completedSteps[])
 5. git push → master:main (not master:master)
 ```
 
@@ -22,13 +22,13 @@
 
 ---
 
-## Contact Schema (current — data.js)
+## Contact Schema (data.js `createContact`)
 
 ```js
 {
   id, ownerEmail, name, phone, email, nric, dob, occupation,
-  employer,       // ✅ NEW — Name of Employer from ALPP
-  nationality,    // ✅ NEW — from ALPP
+  employer,       // ✅ from ALPP
+  nationality,    // ✅ from ALPP
   notes, tags[],
   race, stayArea, state, maritalStatus, dependants,
   jobType, income, langPref, gender, religion,
@@ -39,49 +39,55 @@
 
 ---
 
+## To-Do Mode (ALL case modules now migrated)
+
+```
+renderStatusStep(cs, stepDef, options)
+  completedSteps.includes(stepDef.n)?
+    YES → green checked row (click to uncheck via handleStepClick)
+    NO  → checkbox → handleStepClick → openSetStatusWithDate
+              → confirmSetStatusWithDate(caseId, stepN)
+                  → toggleStepDone()        ← NOT setStatus()
+                  → checkStepAutoReminder() ← fires autoReminder if defined on step
+                  → currentStatus = Math.max(...completedSteps)
+```
+
+**Modules in to-do mode:** sales ✅ · onboarding ✅ · claims ✅ · servicing ✅ · recruitment ✅
+
+**Recruitment special flow:**
+- Steps 1-3: normal checkboxes
+- After step 3: `renderConsiderChoices` → `handleConsiderChoice` → `toggleStepDone` (NOT setStatus)
+- Step 5 (Agreed): auto-creates onboarding case via `checkAutoTransfer`
+- Step 6 (KIV): `reactivateFromKIV` removes step 6 from completedSteps
+
+---
+
 ## ALPP Scraper State
 
-**Script:** `alpp_scraper.js` in project root
-**localStorage key:** `alpp_scrape_v3` (Chrome tab on ALPP)
-**Progress as of last save:** 49/199 policies done, 32 with phone/email/NRIC
-**Status:** Still running in Chrome tab
+| Item | Value |
+|---|---|
+| Pass 1 | COMPLETE — 199/199 done, 74 contacts created in CRM |
+| Pass 2 script | `alpp_scraper_pass2.js` (project root) |
+| Pass 2 storage key | `alpp_scrape_pass2` (Chrome localStorage on ALPP tab) |
+| Pass 2 target | 93 non-ILP/traditional policies |
+| Pass 2 status | User running — not yet complete |
 
-### Resume Instructions
-```
-1. Check tab: window._alppStatus  →  { running, done, current }
-2. If stopped: paste alpp_scraper.js in console — auto-resumes from localStorage
-3. If tab closed: re-login ALPP → any policy detail → paste alpp_scraper.js
-```
+**Resume Pass 2:**
+1. Login ALPP → any policy detail page
+2. F12 → Console → paste `alpp_scraper_pass2.js` (auto-resumes from localStorage)
 
-### Scraper Technical Notes
-- Submit method: native value setter + input/change events + Enter keydown + btn.click()
-- Wait method: poll until "Please wait" gone AND inp.value === polNo AND POLICY OWNER h5 exists
-- ILP policies (A-series like 7XXXXXXA): work fine — have POLICY OWNER h5
-- Non-ILP/traditional policies: timeout — different page layout, no POLICY OWNER h5
-- 17 timed-out policy numbers saved in SESSION_SUMMARY.md
+**Import result:**
+- CRM → **🔄 ALPP Enrich** → select `alpp_enriched_pass2_*.json`
+- Matches by name → enriches empty fields OR creates new contact if not found
 
-### ALPP Page Structure (ILP policies)
-```
-POLICY OWNER: h5
-  └── td (contains ALL owner info):
-      - Name (2nd line after heading)
-      - New NRIC No./Old NRIC No./Passport No.\n{value}
-      - DOB:\n{DD MONTH YYYY}
-      - Gender:\n{MALE|FEMALE}
-      - Nationality:\n{value}
-      - Occupation:\n{value}
-      - Address\n{multiline}
-      - Email:- {value}
-      - Mobile Phone: {value}
-      - Tel.(Office): {value}
-      - Name of Employer:\n{value}  OR  Name Of Employer:\n{value}
-```
+---
 
-### CRM Enrichment Button
-CRM → **🔄 ALPP Enrich** → select `alpp_enriched_*.json`
-- Matches by owner name (case-insensitive)
-- Only fills EMPTY fields — never overwrites
-- Reports: X contacts updated, Y fields filled
+## ALPP Enrich Button — How It Works
+- File input `#crmImportInput` is shared between Excel import and ALPP JSON
+- `handleCRMImportFile` bails early if file is `.json` (fixed bug)
+- `processALPPEnrichment` deduplicates by owner name, enriches matched contacts, **creates new contacts** for unmatched ones
+- Names converted to Title Case on creation
+- Only fills EMPTY fields — never overwrites existing data
 
 ---
 
@@ -98,17 +104,13 @@ Script load order: data.js → utils.js → sounds.js → [page modules] → app
 ## Tool Limitations (not app bugs)
 
 - `preview_screenshot` → hangs on `backdrop-filter` CSS — use `preview_snapshot`
-- Chrome = read-tier in computer-use — cannot click/type
-- Native browser `confirm()` dialogs must be dismissed manually
+- Chrome = read-tier in computer-use — cannot click/type; use Claude-in-Chrome MCP instead
+- Chrome MCP cannot reach `alpp.aia.com.my` (DNS issue in MCP tab) — user must run scraper manually
 
 ---
 
 ## Pending Work (priority order)
 
-1. ⏳ ALPP scraper completing (running in Chrome) — then import via 🔄 ALPP Enrich
-2. Second pass on 17 timed-out policies (non-ILP page layout)
-3. Migrate `claims.js` to to-do mode (reference: `sales.js`)
-4. Migrate `servicing.js` to to-do mode
-5. Migrate `recruitment.js` to to-do mode
-6. Team Dashboard: hierarchy + agent stats
-7. Dashboard pipeline charts
+1. ⏳ ALPP Pass 2 completing (user running now) → import via 🔄 ALPP Enrich
+2. Team Dashboard: hierarchy + agent stats
+3. Dashboard pipeline charts

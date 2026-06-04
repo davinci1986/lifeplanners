@@ -12,19 +12,19 @@
 ## Stack
 Vanilla HTML/CSS/JS · SheetJS CDN · Web Audio API · GitHub Pages · No build step
 
-## Current State (~85%)
+## Current State (~90%)
 - ✅ CRM: contacts, Bulk WhatsApp, Excel import/export, Glass design, 12 sounds
-- ✅ CRM: `employer` + `nationality` fields added to schema, form, detail view
-- ✅ CRM: `🔄 ALPP Enrich` button — reads `alpp_enriched_*.json` → updates contacts
-- ✅ `alpp_scraper.js` — browser console scraper, 49/199 done, running in Chrome
-- ✅ Sales + Onboarding: to-do mode (`completedSteps[]`)
-- ❌ Claims, Servicing, Recruitment: still old linear mode — next priority
+- ✅ CRM: `employer` + `nationality` fields, `🔄 ALPP Enrich` (creates + enriches contacts from JSON)
+- ✅ Sales, Onboarding, Claims, Servicing, Recruitment: all in **to-do mode** (`completedSteps[]`)
+- ✅ Auto-reminders fire correctly when steps are checked (`checkStepAutoReminder`)
+- ✅ ALPP Pass 1 complete: 74 new contacts imported
+- ⏳ ALPP Pass 2: `alpp_scraper_pass2.js` ready — 93 remaining policies — **user about to run**
 - ❌ Team Dashboard, pipeline charts: not started
 
-## Immediate Priorities
-1. **ALPP scraper** — still running in Chrome tab (49/199 done). When complete, use `🔄 ALPP Enrich` in CRM to import. See CLAUDE_MEMORY.md for resume instructions.
-2. Migrate `claims.js` → to-do mode (reference: `sales.js`)
-3. Migrate `servicing.js` + `recruitment.js` → to-do mode
+## Immediate Priority
+1. **ALPP Pass 2** — user runs `alpp_scraper_pass2.js` in Chrome DevTools on ALPP policy detail page → downloads `alpp_enriched_pass2_*.json` → import via 🔄 ALPP Enrich
+2. Team Dashboard (hierarchy tree + per-agent stats)
+3. Dashboard pipeline charts
 
 ## Must-Know Rules
 - `existingInsurance` = **always ARRAY** — `Array.isArray()` before use
