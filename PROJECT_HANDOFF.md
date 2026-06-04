@@ -1,161 +1,113 @@
 # PROJECT_HANDOFF.md — LifePlanner Pro
 
-## Project Overview
+## What Is This
 
-**LifePlanner Pro** is a private, team-based CRM and case management web app for Malaysian insurance advisors (AIA agents). Runs entirely in the browser — no server, all data in `localStorage` with optional Google Drive sync.
+Browser-only CRM + case management for Keith's AIA insurance agent team in Malaysia.
+No server. No build step. localStorage + optional Google Drive sync. GitHub Pages hosting.
 
-### Business Objectives
-- Replace spreadsheets for tracking insurance sales pipelines, claims, servicing, recruitment, onboarding
-- CRM with full Malaysian-specific contact profiles (race, religion, income, insurance, tags)
-- Bulk WhatsApp messaging with festive/sales templates
-- Team hierarchy and agent management
-- Snapwill (digital will writing) case tracking
+**Live:** https://davinci1986.github.io/lifeplanners/
+**Local:** `C:\Users\Keith\todo-dashboard\`
+**Login:** admin / admin
+**Git push:** `git push origin master:main`
+**Git commit:** `git -c user.name="Keith" -c user.email="chongwei1986@gmail.com" commit -m "..."`
 
-### Target Users
-- Keith (Admin/DM) — primary user and project owner
-- Insurance agent team — roles: `admin`, `dm`, `um`, `agent`
-
-### Main User Flows
-1. Login (local username/password or Google OAuth) → Dashboard
-2. CRM: Add/edit contacts → link cases → track status progress (to-do steps)
-3. Bulk WhatsApp: filter contacts by profile → select template → generate pre-filled WA links
-4. Case modules: open cases, advance status steps, set reminders
-5. Excel export (full data) / Excel import (contacts)
-
----
-
-## Current Status
-
-- **Overall completion: ~82%**
-- **Phase:** Feature-complete core; older modules need to-do mode migration
-- **Last session:** Glass design system, CRM filters/views/search/import, 12 sounds, sound toggle
+After push: GitHub Pages takes ~2 min. Users need Ctrl+Shift+R.
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Vanilla HTML/CSS/JS (no framework) |
-| Styling | Custom CSS — Apple/glass design system |
-| Data | localStorage (`lifeplanner_v1` key) |
-| Auth | Local username/password + Google OAuth |
-| Cloud sync | Google Drive (optional, `gdrive.js`) |
-| Excel | SheetJS (XLSX) CDN in index.html |
-| Fonts | Inter (Google Fonts) |
-| Hosting | GitHub Pages — https://davinci1986.github.io/lifeplanners/ |
-| Git | Local `master` → remote `main` |
+| Layer | Detail |
+|---|---|
+| Language | Vanilla HTML/CSS/JS — no framework, no bundler |
+| Data | `localStorage['lifeplanner_v1']` — single JSON object |
+| Auth | Local username/password (plaintext, internal) + Google OAuth |
+| Cloud | Google Drive backup/sync (`gauth.js` + `gdrive.js`) |
+| Excel | SheetJS CDN — check `typeof XLSX !== 'undefined'` before use |
+| Hosting | GitHub Pages (static) |
 
 ---
 
-## Folder Structure
+## Current Status: ~85% Complete
 
+### ✅ Done
+- CRM contacts: 20+ fields, 4 view modes, filter bar, search, Excel import/export, Bulk WhatsApp
+- CRM: `employer` + `nationality` fields added (from ALPP enrichment)
+- CRM: `🔄 ALPP Enrich` button — reads scraper output JSON → updates empty fields
+- `alpp_scraper.js` — browser console scraper for ALPP policy detail pages
+- Sales cases: to-do mode (`completedSteps[]`)
+- Onboarding cases: to-do mode
+- Sound system: 12 Web Audio sounds
+- Glass design: backdrop-filter, neon gradients
+
+### ❌ Pending (priority order)
+1. **ALPP scraper completing** — 49/199 done, running in Chrome (see scraper state below)
+2. **Second pass** on 17 timed-out non-ILP policies
+3. **Migrate `claims.js`** to to-do mode (reference: `sales.js`)
+4. **Migrate `servicing.js`** to to-do mode
+5. **Migrate `recruitment.js`** to to-do mode
+6. **Team Dashboard** — hierarchy tree + per-agent stats
+7. **Dashboard charts** — pipeline bar chart, conversion rate
+
+---
+
+## ALPP Scraper — Current State
+
+| Field | Value |
+|---|---|
+| Script | `alpp_scraper.js` (project root) |
+| localStorage key | `alpp_scrape_v3` (in Chrome tab on ALPP) |
+| Progress | 49/199 policies scraped |
+| Successes | 32 contacts with phone + email + NRIC + employer |
+| Errors | 17 (timeout on non-ILP policies) |
+| Output | `alpp_enriched_YYYY-MM-DD.json` (auto-downloads on completion) |
+
+### Resume Instructions
 ```
-todo-dashboard/
-├── index.html              # SPA shell, all modals, sidebar HTML
-├── css/app.css             # Complete glass design system
-├── js/
-│   ├── data.js             # DB layer — localStorage CRUD, status defs, CRM options
-│   ├── sounds.js           # 12 context-aware Web Audio sounds + toggle
-│   ├── utils.js            # Toast, modals, IC/DOB, avatar, catMeta, badges
-│   ├── app.js              # Router, KIV/Follow-up, localLogin, navigateTo
-│   ├── crm.js              # CRM contacts + Bulk WhatsApp + Excel import
-│   ├── sales.js            # Sales cases (to-do mode ✅)
-│   ├── claims.js           # Claims (❌ OLD linear — needs to-do mode)
-│   ├── servicing.js        # Servicing (❌ OLD linear — needs to-do mode)
-│   ├── recruitment.js      # Recruitment (❌ OLD linear — needs to-do mode)
-│   ├── onboarding.js       # Onboarding (to-do mode ✅)
-│   ├── aisolution.js       # AI Solution custom case type
-│   ├── others.js           # Others/custom category
-│   ├── snapwill.js         # Snapwill digital will cases
-│   ├── export.js           # Excel export (6 sheets, SheetJS)
-│   ├── gauth.js            # Google OAuth login
-│   ├── gdrive.js           # Google Drive sync
-│   ├── sheets.js           # Google Sheets team sync
-│   ├── reminders.js        # Reminders page
-│   ├── whatsapp.js         # WhatsApp script generator
-│   └── dashboard.js        # Dashboard overview
-├── PROJECT_HANDOFF.md
-├── ARCHITECTURE.md
-├── DEVELOPMENT_RULES.md
-├── CLAUDE_MEMORY.md
-├── SESSION_SUMMARY.md
-└── NEW_SESSION_BOOTSTRAP.md
+If Chrome tab still open:
+  DevTools → Console → window._alppStatus  (check running state)
+  If stopped: paste alpp_scraper.js — auto-resumes from localStorage
+
+If tab closed:
+  1. Login to https://www.alpp.aia.com.my
+  2. MY SERVICING → Policy Status Enquiry → A3719 → Inforce-Premium Paying → SUBMIT
+  3. Click OK on native confirm popup (manual)
+  4. Click any policy to open detail page
+  5. DevTools → Console → paste alpp_scraper.js
 ```
 
----
+### Timed-Out Policies (non-ILP — need second pass)
+```
+7005332A04, 7535986A10, 5523205A06, 4200336A05, 1087608A10, 5351468A02,
+0740117J09, 7763082A10, 4113349A02, 7164156A00, 7211229A05, 7260012A00,
+0040108J02, 5224270A04, 0825306J10, 7157497A10, 5159628A08
+```
+These are traditional (non-ILP) policies — different page layout, no `POLICY OWNER:` h5.
+Second pass extractor needs to find owner data without relying on that heading.
 
-## Features Completed
-
-### CRM Contacts
-- Full contact form (20+ fields, Malaysian-specific)
-- 4 view modes: List / Grid / Large / Extra Large icons
-- Filter bar: Race, Gender, State, Marital Status, Tag, Has Cases, Birthday
-- Active filter chips (removable), filter count badge
-- Enhanced search: all fields + linked case labels/history/tags/insurance
-- Excel/CSV import: smart column mapping, 20+ synonyms (EN + BM), preview modal
-- Bulk WhatsApp: 20+ templates, quick-select groups, pre-filled links
-- Full Excel export
-
-### Case Management
-- **Sales** ✅ — to-do mode, 8 steps, priority/KIV/follow-up flags, premiums, examinations
-- **Onboarding** ✅ — to-do mode, 9 steps
-- **Claims** ⚠️ — linear mode, 10 steps (needs migration)
-- **Servicing** ⚠️ — linear mode, 9 steps (needs migration)
-- **Recruitment** ⚠️ — linear mode, 6 steps (needs migration)
-- **Snapwill** — functional
-- **AI Solution** — functional with custom ai steps
-- **Others** — functional
-
-### Sound System
-- 12 distinct Web Audio API sounds (no external files needed)
-- Context-aware event delegation (nav, open, close, create, save, delete, filter, toggle, complete, reminder, birthday, export)
-- Sound toggle in topbar (persisted in DB, default ON)
-
-### Glass Design System
-- Backdrop-filter on all cards, modals, topbar
-- Neon blue→purple gradient buttons with glow
-- Holographic shimmer animation on stat cards
-- Mesh radial gradient background
-- Dark sidebar (#0A0D1A → #0F1228)
-- Mobile-optimized (reduced blur ≤768px)
-
-### Infrastructure
-- Google OAuth + local auth
-- Google Drive backup/restore/auto-save
-- Google Sheets team sync
-- Role-based navigation (admin/dm/um/agent)
-- Admin panel for user management
+### Import Into CRM
+After scraper completes: CRM → **🔄 ALPP Enrich** → select `alpp_enriched_*.json`
+- Matches by owner name (case-insensitive)
+- Only fills EMPTY fields (phone, email, nric, dob, gender, occupation, employer, nationality)
+- Never overwrites existing data
 
 ---
 
-## Features Pending
-
-1. Migrate claims.js to to-do mode
-2. Migrate servicing.js to to-do mode
-3. Migrate recruitment.js to to-do mode
-4. Team Dashboard: hierarchy tree + agent stats
-5. Dashboard charts (pipeline, conversion)
-6. Contact import: deduplication + better date parsing
-7. CRM: bulk actions (delete/tag/export multiple)
-8. Dark mode toggle
-9. Mobile bottom tab nav
-10. PWA offline support
-
----
-
-## Database Documentation
+## Database
 
 **Key:** `localStorage['lifeplanner_v1']`
+**Shape:** `{ contacts[], cases[], reminders[], settings{}, customCategories[], customLabels{}, globalStatusDefs{} }`
 
 ### Contact Object
 ```js
 {
-  id, ownerEmail, name, phone, email, nric, dob, occupation, notes,
-  tags[],                   // string array
-  race, stayArea, state, maritalStatus, dependants, jobType, income,
-  langPref, gender, religion,
-  existingInsurance[],      // ARRAY — NEVER string. Always Array.isArray() before use
+  id, ownerEmail, name, phone, email, nric, dob, occupation,
+  employer,       // Name of Employer — from ALPP
+  nationality,    // from ALPP
+  notes, tags[],
+  race, stayArea, state, maritalStatus, dependants,
+  jobType, income, langPref, gender, religion,
+  existingInsurance[],  // ⚠️ ALWAYS ARRAY — Array.isArray() before any use
   referralSource, socialMedia, createdAt, updatedAt
 }
 ```
@@ -164,73 +116,77 @@ todo-dashboard/
 ```js
 {
   id, ownerEmail, contactId, contactName,
-  category,           // 'sales'|'claims'|'servicing'|'recruitment'|'onboarding'|'snapwill'|'aisolution'|'others'
-  categories[],       // multi-category
-  label, subLabel,    // B1-B5, C1-C8, 'AIA', 'Snapwill', custom
-  currentStatus,      // int — max of completedSteps[] in to-do mode
-  completedSteps[],   // int[] — to-do mode only
-  statusHistory[],    // [{fromStatus, toStatus, remark, date}]
-  customStatusLabels, remarks, reminders[], priority, kiv, followUp,
+  category,          // sales|claims|servicing|recruitment|onboarding|snapwill|aisolution|others
+  label, subLabel,
+  currentStatus,     // int — max(completedSteps) in to-do mode
+  completedSteps[],  // int[] — to-do mode only
+  statusHistory[],   // [{fromStatus, toStatus, remark, date}]
+  customStatusLabels{}, remarks, reminders[], priority, kiv, followUp,
   premiums[], examinations[], recruitPrograms[], fieldwork[],
-  closedDate, customFields{}, aiSteps[], snapwillTypes[], nextStep,
-  createdAt, updatedAt
-}
-```
-
-### Settings Object
-```js
-settings: {
-  theme: 'light',
-  notifySound: true,        // sound on/off
-  crmOptions: {},           // custom dropdown options per field
-  snapwillTypes: [],
-  _lastSaved: ISO string    // Drive conflict resolution timestamp
+  closedDate, customFields{}, createdAt, updatedAt
 }
 ```
 
 ---
 
-## Deployment
+## Status Definitions
 
-- **Live:** https://davinci1986.github.io/lifeplanners/
-- **Repo:** https://github.com/davinci1986/lifeplanners
-- **Push:** `git push origin master:main`
-- **Commit:** `git -c user.name="Keith" -c user.email="chongwei1986@gmail.com" commit -m "..."`
-- No CI/CD — push = live in 1–2 min (may need hard refresh / Ctrl+Shift+R)
+### Sales (8 steps)
+Approached → Fact-Finding → Policy Summary → Closing Appointment → Closed/Proposed → Cementing Session → Ask for Referrals → KIV Listing
 
----
+### Claims (10 steps)
+Ask Receipts → Pending Submission → Submitted (autoReminder 7d) → Checked Status → Checking Again → Pending Memo → Send Requirement → Submit Memo → Pending Memo Follow-Up (autoReminder 7d) → Claim Completed
 
-## Known Bugs & Technical Debt
+### Servicing (9 steps)
+Fill Forms → Send Link → Reminder to Approve → Check Status (autoReminder 7d) → Pending Memo → Send Requirement → Submit Memo → Pending Memo Follow-Up (autoReminder 7d) → Status Approved
 
-1. `existingInsurance` — legacy contacts may have string; always use `Array.isArray()`
-2. `_blastFilter.insuranceFilter` is `[]` array; all other blast filter fields are strings — unique exception
-3. `confirmSetStatusWithDate()` calls `toggleStepDone()` NOT `setStatus()` — do NOT revert
-4. Claims/Servicing/Recruitment use old linear rendering — inconsistent with Sales/Onboarding
-5. No contact deduplication on Excel import
-6. `backdrop-filter` causes headless screenshot tool to time out — not a real browser issue
-7. Gender field in contact form — verify `renderContactForm()` includes gender dropdown (was added in a prior session, confirm it's still there)
+### Recruitment (6 steps)
+Approached → Fact-Finding → Closing Appointment → Candidate Consider (autoReminder 3d, repeat) → Candidate Agreed → Candidate KIV
+
+### Onboarding (9 steps)
+Key in BALP (autoReminder 90d) → Arrange Exam → 20 Names Hotlist (autoReminder 5d) → Training → Policy Review → Fieldwork → Fieldwork Closed → Exam Complete → Completed
 
 ---
 
-## Next 20 Tasks (Recommended Order)
+## To-Do Mode (Sales, Onboarding)
 
-1. Verify gender field in `renderContactForm()` in crm.js
-2. Migrate claims.js to `renderStatusStep()` + `completedSteps[]`
-3. Migrate servicing.js to to-do mode
-4. Migrate recruitment.js to to-do mode
-5. Team Dashboard: hierarchy tree + agent stats
-6. Dashboard: sales pipeline chart
-7. Dashboard: floating analytics widgets
-8. Contact import: date parsing (DD/MM/YYYY, auto-DOB from IC)
-9. Contact import: deduplication (skip/merge by name+phone)
-10. Search: highlight matched text in results
-11. CRM list view: sortable columns
-12. CRM: bulk select actions (delete/tag/export)
-13. Reminders: recurring support
-14. Mobile: bottom tab navigation
-15. Dark mode toggle
-16. Print/PDF contact profile view
-17. WhatsApp blast: send history log
-18. Dashboard: conversion rate widget
-19. PWA manifest + service worker
-20. Virtual scroll for 500+ contacts
+```
+renderStatusStep(cs, stepDef, caseId)
+  stepDef.n in cs.completedSteps[]?
+    YES → green checked row
+    NO  → checkbox → confirmSetStatusWithDate()
+              → toggleStepDone(caseId, stepN, remark, date)
+                  → toggles completedSteps[]
+                  → currentStatus = Math.max(...completedSteps)
+
+⚠️ confirmSetStatusWithDate() MUST call toggleStepDone() — NOT setStatus()
+```
+
+## Linear Mode (Claims, Servicing, Recruitment — needs migration)
+```
+"Next Step" button → advanceCaseStatus(id) → currentStatus += 1
+// completedSteps[] not used
+```
+
+---
+
+## Critical Rules
+
+| Rule | Detail |
+|---|---|
+| `existingInsurance` | Always ARRAY. `Array.isArray()` before any operation. |
+| `_blastFilter.insuranceFilter` | `[]` not `''`. Only array field in blast filter. |
+| `confirmSetStatusWithDate()` | Calls `toggleStepDone()` NOT `setStatus()`. |
+| Glass CSS | `var(--glass)` always. Never hardcode `rgba()`. |
+| `backdrop-filter` | Causes headless screenshot hangs. Use `preview_snapshot`. |
+| `updateSoundBtn()` | Called from `localLogin()` only — not `loadDB()`. |
+| Git branch | Local `master` → remote `main`. Push: `master:main`. |
+| Working dir | `C:\Users\Keith\todo-dashboard\` — NOT nested copy. |
+
+---
+
+## Business Context
+
+- Keith = AIA agent, Code A3719, PN PBG CK PARTNERS, Malaysia
+- Team roles: `admin` / `dm` / `um` / `agent`
+- Malaysian market: BM import column names, race/religion/langPref fields, festive WA templates
