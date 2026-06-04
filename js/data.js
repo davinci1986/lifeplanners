@@ -40,6 +40,7 @@ function ensureDefaults() {
   if (!DB.settings) DB.settings = {};
   if (!DB.customCategories) DB.customCategories = [];
   if (!DB.customLabels) DB.customLabels = {};
+  if (!DB.globalStatusDefs) DB.globalStatusDefs = {};
 }
 
 function uid() {
@@ -72,6 +73,20 @@ function createContact(data) {
     occupation: data.occupation || '',
     notes: data.notes || '',
     tags: data.tags || [],
+    // Extended CRM fields
+    race: data.race || '',
+    stayArea: data.stayArea || '',
+    state: data.state || '',
+    maritalStatus: data.maritalStatus || '',
+    dependants: data.dependants || '',
+    jobType: data.jobType || '',
+    income: data.income || '',
+    langPref: data.langPref || '',
+    gender: data.gender || '',
+    religion: data.religion || '',
+    existingInsurance: Array.isArray(data.existingInsurance) ? data.existingInsurance : (data.existingInsurance ? [data.existingInsurance] : []),
+    referralSource: data.referralSource || '',
+    socialMedia: data.socialMedia || '',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -145,6 +160,9 @@ function createCase(data) {
     fieldwork: data.fieldwork || [],
     closedDate: data.closedDate || null,
     customFields: data.customFields || {},
+    completedSteps: data.completedSteps || [],
+    aiSteps: data.aiSteps || [],
+    snapwillTypes: data.snapwillTypes || [],
     nextStep: data.nextStep || '',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -325,14 +343,28 @@ const STATUS_DEFS = {
     { n: 5, label: 'Closed Snapwill Case' },
     { n: 6, label: 'KIV' }
   ],
+  aisolution: [],
   others: []
 };
 
 function getStatusDef(category) {
-  if (STATUS_DEFS[category]) return STATUS_DEFS[category];
+  // Global overrides take precedence (admin-customized built-in categories)
+  if (DB.globalStatusDefs?.[category]?.length) return DB.globalStatusDefs[category];
+  if (STATUS_DEFS[category] !== undefined) return STATUS_DEFS[category];
   // Check custom categories
   const custom = (DB.customCategories || []).find(c => c.id === category);
   return custom ? (custom.statuses || []) : [];
+}
+
+function setGlobalStatusDef(category, defs) {
+  if (!DB.globalStatusDefs) DB.globalStatusDefs = {};
+  DB.globalStatusDefs[category] = defs;
+  saveDB();
+}
+
+function resetGlobalStatusDef(category) {
+  if (DB.globalStatusDefs) delete DB.globalStatusDefs[category];
+  saveDB();
 }
 
 // Get label — checks case's custom overrides first
@@ -350,8 +382,12 @@ function getCustomLabelDefs(category) {
 function addCustomLabel(category, labelObj) {
   if (!DB.customLabels) DB.customLabels = {};
   if (!DB.customLabels[category]) DB.customLabels[category] = [];
-  DB.customLabels[category].push({ id: labelObj.id || uid(), label: labelObj.label });
+  const existing = DB.customLabels[category].find(l => l.label.toLowerCase() === (labelObj.label || '').toLowerCase());
+  if (existing) return existing;
+  const entry = { id: labelObj.id || uid(), label: labelObj.label };
+  DB.customLabels[category].push(entry);
   saveDB();
+  return entry;
 }
 function deleteCustomLabel(category, labelId) {
   if (!DB.customLabels?.[category]) return;
@@ -499,6 +535,106 @@ function getCategoryStats(category) {
   const kivCount = cases.filter(c => c.kiv).length;
   const dueReminders = getDueReminders().filter(r => r.category === category).length;
   return { total, active, completed, kivCount, dueReminders };
+}
+
+/* ---------- CRM OPTIONS (reusable dropdown lists) ---------- */
+const DEFAULT_CRM_OPTIONS = {
+  races:      ['Malay', 'Chinese', 'Indian', 'Kadazan', 'Iban', 'Others'],
+  areas:      ['Kuala Lumpur', 'Petaling Jaya', 'Subang Jaya', 'Klang', 'Shah Alam', 'Puchong', 'Cheras', 'Ampang', 'Kepong', 'Damansara', 'Mont Kiara', 'Bangsar', 'Penang', 'Johor Bahru', 'Ipoh', 'Kuching', 'Kota Kinabalu', 'Seremban', 'Melaka', 'Others'],
+  states:     ['Kuala Lumpur', 'Selangor', 'Penang', 'Johor', 'Perak', 'Kedah', 'Kelantan', 'Terengganu', 'Pahang', 'Negeri Sembilan', 'Melaka', 'Perlis', 'Sabah', 'Sarawak', 'Labuan', 'Putrajaya'],
+  incomes:    ['< RM2,000', 'RM2,000–4,000', 'RM4,000–8,000', 'RM8,000–15,000', '> RM15,000'],
+  maritalStatuses: ['Single', 'Married', 'Divorced', 'Widowed'],
+  jobTypes:   ['Employee (Private)', 'Employee (Government)', 'Self-Employed', 'Business Owner', 'Retiree', 'Housewife', 'Student', 'Others'],
+  langPrefs:  ['English', 'Bahasa Malaysia', 'Mandarin', 'Cantonese', 'Hokkien', 'Hakka', 'Tamil', 'Others'],
+  insurances: ['None', 'AIA', 'Prudential', 'Great Eastern', 'Allianz', 'Hong Leong Assurance', 'Manulife', 'Sun Life', 'AXA Affin', 'Zurich', 'ETIQA', 'Others'],
+  referrals:  ['Self', 'Facebook', 'Instagram', 'TikTok', 'WhatsApp Group', 'Referral — Friend', 'Referral — Family', 'Cold Call', 'Walk-In', 'Seminar / Event', 'Others'],
+  religions:  ['Islam', 'Buddhism', 'Christianity', 'Hinduism', 'Taoism', 'Sikhism', 'Others'],
+  genders:    ['Male', 'Female'],
+  tags:       ['VIP', 'Hot Lead', 'Cold Lead', 'Existing Client', 'Agent Prospect', 'Referrer', 'Long-Term Follow-Up']
+};
+
+function getCRMOptions(field) {
+  const custom = DB.settings?.crmOptions?.[field];
+  return (custom && custom.length > 0) ? custom : [...(DEFAULT_CRM_OPTIONS[field] || [])];
+}
+
+function addCRMOption(field, value) {
+  if (!DB.settings) DB.settings = {};
+  if (!DB.settings.crmOptions) DB.settings.crmOptions = {};
+  if (!DB.settings.crmOptions[field]) DB.settings.crmOptions[field] = [...(DEFAULT_CRM_OPTIONS[field] || [])];
+  const clean = value.trim();
+  if (!clean || DB.settings.crmOptions[field].includes(clean)) return false;
+  DB.settings.crmOptions[field].push(clean);
+  saveDB();
+  return true;
+}
+
+/* ---------- TO-DO STEP TOGGLE ---------- */
+function toggleStepDone(caseId, stepN, remark, date) {
+  const c = getCase(caseId);
+  if (!c) return null;
+  const steps = [...(c.completedSteps || [])];
+  const idx = steps.indexOf(stepN);
+  const histEntry = idx >= 0
+    ? { fromStatus: stepN, toStatus: 0, remark: 'Step unchecked', date: new Date().toISOString() }
+    : { fromStatus: c.currentStatus || 0, toStatus: stepN, remark: remark || '', date: date ? new Date(date).toISOString() : new Date().toISOString() };
+  if (idx >= 0) steps.splice(idx, 1); else steps.push(stepN);
+  const maxStep = steps.length > 0 ? Math.max(...steps) : 0;
+  return updateCase(caseId, { completedSteps: steps, currentStatus: maxStep, statusHistory: [...(c.statusHistory || []), histEntry] });
+}
+
+/* ---------- SNAPWILL CUSTOMER TYPES ---------- */
+const DEFAULT_SNAPWILL_TYPES = ['Will', 'Memories', 'Subscription 199', 'Subscription 299', 'Leader Account', 'Affiliate', 'Business Partner', 'School Donation', 'Booth'];
+
+function getSnapwillTypes() {
+  if (DB.settings?.snapwillTypes?.length) return DB.settings.snapwillTypes;
+  return [...DEFAULT_SNAPWILL_TYPES];
+}
+
+function addSnapwillType(typeName) {
+  if (!DB.settings) DB.settings = {};
+  if (!DB.settings.snapwillTypes) DB.settings.snapwillTypes = [...DEFAULT_SNAPWILL_TYPES];
+  const clean = typeName.trim();
+  if (!clean || DB.settings.snapwillTypes.includes(clean)) { showToast('Type already exists', 'warning'); return; }
+  DB.settings.snapwillTypes.push(clean);
+  saveDB();
+  showToast(`"${clean}" added!`, 'success');
+}
+
+/* ---------- AI SOLUTION STEPS ---------- */
+function addAIStep(caseId, label) {
+  const c = getCase(caseId);
+  if (!c) return;
+  const steps = [...(c.aiSteps || [])];
+  const maxN = steps.reduce((m, s) => Math.max(m, s.n || 0), 0);
+  steps.push({ id: uid(), n: maxN + 1, label: label.trim(), done: false, date: null, remark: '' });
+  updateCase(caseId, { aiSteps: steps });
+}
+
+function toggleAIStep(caseId, stepId, date, remark) {
+  const c = getCase(caseId);
+  if (!c) return;
+  const steps = (c.aiSteps || []).map(s => {
+    if (s.id !== stepId) return s;
+    return s.done
+      ? { ...s, done: false, date: null, remark: '' }
+      : { ...s, done: true, date: date || new Date().toISOString().split('T')[0], remark: remark || '' };
+  });
+  updateCase(caseId, { aiSteps: steps });
+}
+
+function deleteAIStep(caseId, stepId) {
+  const c = getCase(caseId);
+  if (!c) return;
+  const steps = (c.aiSteps || []).filter(s => s.id !== stepId);
+  updateCase(caseId, { aiSteps: steps });
+}
+
+function renameAIStep(caseId, stepId, newLabel) {
+  const c = getCase(caseId);
+  if (!c) return;
+  const steps = (c.aiSteps || []).map(s => s.id === stepId ? { ...s, label: newLabel } : s);
+  updateCase(caseId, { aiSteps: steps });
 }
 
 // Init

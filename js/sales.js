@@ -161,7 +161,23 @@ function addLabelToCategory(category) {
   const input = document.getElementById('nf_custom_label');
   const val = input?.value?.trim();
   if (!val) return;
-  addCustomLabel(category, { label: val });
+  const entry = addCustomLabel(category, { label: val });
+  if (!entry) return;
+  // Inject radio button into chip list and auto-select it
+  const chips = document.getElementById('labelChips');
+  if (chips) {
+    let existing = chips.querySelector(`input[value="${entry.id}"]`);
+    if (!existing) {
+      const lbl = document.createElement('label');
+      lbl.className = 'checkbox-wrap';
+      lbl.style.cssText = 'background:var(--bg);border:1.5px solid var(--border);border-radius:8px;padding:5px 10px;cursor:pointer;font-size:12px';
+      lbl.innerHTML = `<input type="radio" name="nf_label" value="${entry.id}"> ${escHtml(entry.id)} — ${escHtml(entry.label)}`;
+      chips.appendChild(lbl);
+      existing = lbl.querySelector('input');
+    }
+    existing.checked = true;
+  }
+  input.value = '';
   showToast('Label saved!', 'success');
   playClick();
 }
@@ -200,7 +216,12 @@ function saveNewCase(category, existingId = '') {
   // Label: radio selection OR custom text input
   const labelRadio = document.querySelector('input[name="nf_label"]:checked');
   const labelCustom = document.getElementById('nf_custom_label')?.value?.trim();
-  const label = labelRadio?.value || labelCustom || '';
+  let label = labelRadio?.value || '';
+  if (!label && labelCustom) {
+    // Find by text to reuse saved ID, else use text directly
+    const savedEntry = (DB.customLabels?.[category] || []).find(l => l.label.toLowerCase() === labelCustom.toLowerCase());
+    label = savedEntry ? savedEntry.id : labelCustom;
+  }
   const remarks = document.getElementById('nf_remarks')?.value || '';
   const priority = document.getElementById('nf_priority')?.checked || false;
 
@@ -280,56 +301,67 @@ function renderCaseDetail(c, contact) {
       </div>
 
       <div class="status-steps">
-        ${statusDefs.map(s => {
-          const isDone = s.n < c.currentStatus;
-          const isCurrent = s.n === c.currentStatus;
-          const hist = (c.statusHistory || []).filter(h => h.toStatus === s.n).pop();
-          const customLabel = c.customStatusLabels?.[s.n] || s.label;
-          return renderStatusStep(c, s, {
-            isDone, isCurrent, histEntry: hist,
-            onClickFn: `openSetStatusWithDate('${c.id}',${s.n},'${escHtml(customLabel)}')`
-          });
-        }).join('')}
+        ${(() => {
+          const completedSteps = c.completedSteps || [];
+          const undone = statusDefs.map(s => s.n).filter(n => !completedSteps.includes(n));
+          const nextStep = undone[0] ?? null;
+          return statusDefs.map(s => {
+            const isDone = completedSteps.includes(s.n);
+            const isCurrent = !isDone && s.n === nextStep;
+            const hist = (c.statusHistory || []).filter(h => h.toStatus === s.n).pop();
+            const customLabel = c.customStatusLabels?.[s.n] || s.label;
+            return renderStatusStep(c, s, {
+              isDone, isCurrent, histEntry: hist,
+              onClickFn: `handleStepClick('${c.id}',${s.n},'${escHtml(customLabel)}')`
+            });
+          }).join('');
+        })()}
       </div>
 
       <!-- Special fields for sales status 5 (premiums) -->
       ${c.category === 'sales' && c.currentStatus >= 5 ? renderPremiumSection(c) : ''}
 
-      <!-- Advance with remark -->
-      ${c.currentStatus < maxStatus ? `
-        <div class="card mt-16" style="background:var(--bg)">
-          <div class="card-body">
-            <div class="form-label">Add Remark & Advance Status</div>
-            <textarea class="form-control mb-8" id="remarkInput" rows="2" placeholder="Add a remark (optional)..."></textarea>
+      <!-- To-do progress summary + branch routing -->
+      ${(() => {
+        const completedSteps = c.completedSteps || [];
+        const allDone = statusDefs.length > 0 && statusDefs.every(s => completedSteps.includes(s.n));
+        const latestDone = completedSteps.length > 0 ? Math.max(...completedSteps) : 0;
+        const branchBtns = `
+          ${c.category === 'sales' && completedSteps.includes(3) ? `
+            <button class="btn btn-warning btn-sm" onclick="setStatusWithRemark('${c.id}',8)">📌 Move to KIV</button>` : ''}
+          ${c.category === 'recruitment' && completedSteps.includes(3) ? `
+            <div class="form-label mt-8">Candidate Decision</div>
+            <textarea class="form-control mb-8" id="remarkInput" rows="2" placeholder="Add remark..."></textarea>
             <div class="btn-row">
-              ${c.currentStatus > 1 ? `<button class="btn btn-secondary btn-sm" onclick="goBackStatus('${c.id}')">← Go Back</button>` : ''}
-              ${c.category === 'sales' && c.currentStatus === 3 ? `
-                <button class="btn btn-warning btn-sm" onclick="setStatusWithRemark('${c.id}',8)">KIV →</button>` : ''}
-              ${c.category === 'recruitment' && c.currentStatus === 3 ? `
-                <button class="btn btn-warning btn-sm" onclick="setStatusWithRemark('${c.id}',4)">Consider →</button>
-                <button class="btn btn-secondary btn-sm" onclick="setStatusWithRemark('${c.id}',6)">KIV →</button>
-                <button class="btn btn-success btn-sm" onclick="setStatusWithRemark('${c.id}',5)">Agreed ✓</button>` : ''}
-              ${c.category === 'claims' && c.currentStatus === 5 ? `
-                <button class="btn btn-warning btn-sm" onclick="setStatusWithRemark('${c.id}',6)">Pending Memo →</button>
-                <button class="btn btn-success btn-sm" onclick="setStatusWithRemark('${c.id}',10)">Completed ✓</button>` : ''}
-              ${c.category === 'servicing' && c.currentStatus === 4 ? `
-                <button class="btn btn-warning btn-sm" onclick="setStatusWithRemark('${c.id}',5)">Pending Memo →</button>
-                <button class="btn btn-success btn-sm" onclick="setStatusWithRemark('${c.id}',9)">Approved ✓</button>` : ''}
-              ${!(['recruitment'].includes(c.category) && c.currentStatus === 3) &&
-                !(['claims'].includes(c.category) && c.currentStatus === 5) &&
-                !(['servicing'].includes(c.category) && c.currentStatus === 4) ? `
-                <button class="btn btn-primary btn-sm" onclick="advanceStatusWithRemark('${c.id}')">Next Step →</button>` : ''}
+              <button class="btn btn-warning btn-sm" onclick="setStatusWithRemark('${c.id}',4)">Consider →</button>
+              <button class="btn btn-secondary btn-sm" onclick="setStatusWithRemark('${c.id}',6)">KIV →</button>
+              <button class="btn btn-success btn-sm" onclick="setStatusWithRemark('${c.id}',5)">Agreed ✓</button>
+            </div>` : ''}
+          ${c.category === 'claims' && completedSteps.includes(5) ? `
+            <div class="form-label mt-8">Claims Routing</div>
+            <textarea class="form-control mb-8" id="remarkInput" rows="2" placeholder="Add remark..."></textarea>
+            <div class="btn-row">
+              <button class="btn btn-warning btn-sm" onclick="setStatusWithRemark('${c.id}',6)">Pending Memo →</button>
+              <button class="btn btn-success btn-sm" onclick="setStatusWithRemark('${c.id}',10)">Completed ✓</button>
+            </div>` : ''}
+          ${c.category === 'servicing' && completedSteps.includes(4) ? `
+            <div class="form-label mt-8">Servicing Routing</div>
+            <textarea class="form-control mb-8" id="remarkInput" rows="2" placeholder="Add remark..."></textarea>
+            <div class="btn-row">
+              <button class="btn btn-warning btn-sm" onclick="setStatusWithRemark('${c.id}',5)">Pending Memo →</button>
+              <button class="btn btn-success btn-sm" onclick="setStatusWithRemark('${c.id}',9)">Approved ✓</button>
+            </div>` : ''}
+        `;
+        if (allDone) return `
+          <div class="card mt-16" style="background:var(--green-light);border-color:var(--green)">
+            <div class="card-body text-center">
+              <div style="font-size:32px">🎉</div>
+              <div class="fw-600" style="color:var(--green)">All steps completed!</div>
+              ${c.category === 'sales' ? '<div class="text-sm text-muted mt-8">Consider cementing session and asking for referrals</div>' : ''}
             </div>
-          </div>
-        </div>` : `
-        <div class="card mt-16" style="background:var(--green-light);border-color:var(--green)">
-          <div class="card-body text-center">
-            <div style="font-size:32px">🎉</div>
-            <div class="fw-600" style="color:var(--green)">All steps completed!</div>
-            ${c.category === 'sales' && c.currentStatus >= 5 ? '<div class="text-sm text-muted mt-8">Consider cementing session and asking for referrals</div>' : ''}
-          </div>
-        </div>`
-      }
+          </div>`;
+        return branchBtns.trim() ? `<div class="card mt-16" style="background:var(--bg)"><div class="card-body">${branchBtns}</div></div>` : '';
+      })()}
     </div>
 
     <!-- Remarks Tab -->

@@ -165,6 +165,7 @@ const CAT_META = {
   recruitment: { label: 'Recruitment', icon: '👥', color: '#AF52DE', bg: '#F3E8FD' },
   onboarding:  { label: 'Onboarding',  icon: '🚀', color: '#5AC8FA', bg: '#E5F6FF' },
   snapwill:    { label: 'Snapwill',    icon: '⚡', color: '#FF2D55', bg: '#FFE5EA' },
+  aisolution:  { label: 'AI Solution', icon: '🤖', color: '#5856D6', bg: '#F0EFFE' },
   others:      { label: 'Others',      icon: '📌', color: '#6B6B6E', bg: '#F5F5F7' }
 };
 function catMeta(category) {
@@ -311,7 +312,7 @@ function dismissReminderAlert() {
 
 /* ---------- BADGES ---------- */
 function updateBadges() {
-  const cats = ['sales','claims','servicing','recruitment','onboarding','snapwill','others'];
+  const cats = ['sales','claims','servicing','recruitment','onboarding','snapwill','aisolution','others'];
   cats.forEach(cat => {
     const stats = getCategoryStats(cat);
     const el = document.getElementById(`badge-${cat}`);
@@ -362,7 +363,7 @@ function openCaseById(id) {
   const handlers = {
     sales: openSalesCase, claims: openClaimsCase, servicing: openServicingCase,
     recruitment: openRecruitCase, onboarding: openOnboardCase,
-    snapwill: openSnapwillCase, others: openOthersCase
+    snapwill: openSnapwillCase, aisolution: openAISolutionCase, others: openOthersCase
   };
   const fn = handlers[c.category];
   if (fn) fn(id);
@@ -524,8 +525,8 @@ function openSetStatusWithDate(caseId, stepN, stepLabel) {
 function confirmSetStatusWithDate(caseId, stepN) {
   const date = document.getElementById('ssd_date')?.value;
   const remark = document.getElementById('ssd_remark')?.value || '';
-  setStatus(caseId, stepN, remark, date);
-  showToast('Status updated!', 'success');
+  toggleStepDone(caseId, stepN, remark, date);
+  showToast('Step done! ✓', 'success');
   playSuccess();
   closeContactModalBtn();
   setTimeout(() => { openCaseById(caseId); updateBadges(); }, 50);
@@ -549,6 +550,23 @@ function refreshSidebarCategories() {
   customs.forEach(cat => {
     PAGE_MAP[cat.id] = { render: () => renderCustomCategory(cat.id), title: cat.name };
   });
+}
+
+/* ---------- TO-DO STEP CLICK HANDLER ---------- */
+function handleStepClick(caseId, stepN, label) {
+  const c = getCase(caseId);
+  if (!c) return;
+  if ((c.completedSteps || []).includes(stepN)) {
+    // Uncheck immediately
+    toggleStepDone(caseId, stepN, '', null);
+    showToast('Step unchecked', 'info');
+    playClick();
+    setTimeout(() => { openCaseById(caseId); updateBadges(); }, 50);
+    renderCurrentPage();
+  } else {
+    // Open date + remark picker
+    openSetStatusWithDate(caseId, stepN, label);
+  }
 }
 
 /* ---------- CUSTOM CATEGORY PAGE ---------- */

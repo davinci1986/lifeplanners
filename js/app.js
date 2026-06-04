@@ -17,6 +17,7 @@ const PAGE_MAP = {
   recruitment: { render: renderRecruitment,     title: 'Recruitment' },
   onboarding:  { render: renderOnboarding,      title: 'Onboarding' },
   snapwill:    { render: renderSnapwill,        title: 'Snapwill' },
+  aisolution:  { render: renderAISolution,      title: 'AI Solution' },
   others:      { render: renderOthers,          title: 'Others' },
   crm:         { render: renderCRM,             title: 'CRM Contacts' },
   reminders:   { render: renderRemindersPage,   title: 'Reminders' },
@@ -296,6 +297,15 @@ function renderAdminPanel() {
       </div>
       <div class="card-body" style="padding-bottom:8px" id="customCatList">
         ${renderCustomCategoryList()}
+      </div>
+    </div>
+
+    <!-- Customize Built-in Categories -->
+    <div class="card mb-24">
+      <div class="card-header"><div class="card-title">🔧 Customize Built-in Category Steps</div></div>
+      <div class="card-body">
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">Rename, add or remove progress steps for any built-in category. Changes apply to all cases.</p>
+        ${renderBuiltinCategoryEditors()}
       </div>
     </div>
 
@@ -606,6 +616,101 @@ async function deleteUser(userId) {
   if (!ok) return;
   saveLocalUsers(users.filter(x => x.id !== userId));
   showToast('User deleted', 'info');
+  renderAdminPanel();
+}
+
+/* ======================================================
+   BUILT-IN CATEGORY STEP CUSTOMIZATION
+   ====================================================== */
+const BUILTIN_CATS = ['sales','claims','servicing','recruitment','onboarding','snapwill'];
+
+function renderBuiltinCategoryEditors() {
+  return BUILTIN_CATS.map(catId => {
+    const meta = catMeta(catId);
+    const steps = getStatusDef(catId);
+    const isCustomised = !!(DB.globalStatusDefs?.[catId]?.length);
+    return `
+      <div style="border:1px solid var(--border);border-radius:10px;margin-bottom:12px;overflow:hidden">
+        <div class="flex items-center gap-8" style="padding:10px 14px;background:var(--bg);cursor:pointer" onclick="toggleBuiltinEditor('bce_${catId}')">
+          <span style="font-size:18px">${meta.icon}</span>
+          <span class="fw-600">${meta.label}</span>
+          <span class="text-xs text-muted">${steps.length} steps</span>
+          ${isCustomised ? '<span style="background:var(--blue);color:#fff;border-radius:10px;padding:1px 8px;font-size:10px">Customised</span>' : ''}
+          <span style="margin-left:auto;color:var(--text-muted)">▼</span>
+        </div>
+        <div id="bce_${catId}" style="display:none;padding:12px 14px">
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px" id="bce_steps_${catId}">
+            ${steps.map(s => `
+              <div style="display:flex;align-items:center;gap:4px;background:#fff;border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:12px">
+                <span style="color:var(--text-muted);font-weight:600;margin-right:2px">${s.n}.</span>
+                <span id="bce_lbl_${catId}_${s.n}">${escHtml(s.label)}</span>
+                <button onclick="openEditBuiltinStep('${catId}',${s.n},'${escHtml(s.label)}')" style="background:none;border:none;cursor:pointer;font-size:10px;color:var(--blue);margin-left:2px">✏</button>
+                <button onclick="removeBuiltinStep('${catId}',${s.n})" style="background:none;border:none;cursor:pointer;font-size:10px;color:var(--red)">✕</button>
+              </div>`).join('')}
+          </div>
+          <div class="flex gap-6 mb-8">
+            <input class="form-control" id="bce_new_${catId}" placeholder="Add new step..." style="font-size:12px" />
+            <button class="btn btn-secondary btn-sm" onclick="addBuiltinStep('${catId}')">+ Add</button>
+          </div>
+          ${isCustomised ? `<button class="btn btn-danger btn-sm" onclick="resetBuiltinCat('${catId}')">↩ Reset to Default</button>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function toggleBuiltinEditor(id) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function openEditBuiltinStep(catId, stepN, currentLabel) {
+  document.getElementById('contactModalTitle').textContent = `✏ Edit Step ${stepN}`;
+  document.getElementById('contactModalBody').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">${catMeta(catId).label} — Step ${stepN}</label>
+      <input class="form-control" id="bce_edit_input" value="${escHtml(currentLabel)}" />
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeContactModalBtn()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveBuiltinStep('${catId}',${stepN})">Save</button>
+    </div>`;
+  openModal('contactModal');
+}
+
+function saveBuiltinStep(catId, stepN) {
+  const newLabel = document.getElementById('bce_edit_input')?.value?.trim();
+  if (!newLabel) { showToast('Please enter a label', 'error'); return; }
+  const defs = JSON.parse(JSON.stringify(getStatusDef(catId)));
+  const idx = defs.findIndex(s => s.n === stepN);
+  if (idx >= 0) defs[idx].label = newLabel; else defs.push({ n: stepN, label: newLabel });
+  setGlobalStatusDef(catId, defs);
+  showToast('Step updated!', 'success');
+  closeContactModalBtn();
+  renderAdminPanel();
+}
+
+function addBuiltinStep(catId) {
+  const input = document.getElementById(`bce_new_${catId}`);
+  const label = input?.value?.trim();
+  if (!label) { showToast('Enter a step name', 'error'); return; }
+  const defs = JSON.parse(JSON.stringify(getStatusDef(catId)));
+  const maxN = defs.reduce((m, s) => Math.max(m, s.n), 0);
+  defs.push({ n: maxN + 1, label });
+  setGlobalStatusDef(catId, defs);
+  showToast('Step added!', 'success');
+  input.value = '';
+  renderAdminPanel();
+}
+
+function removeBuiltinStep(catId, stepN) {
+  const defs = JSON.parse(JSON.stringify(getStatusDef(catId))).filter(s => s.n !== stepN);
+  setGlobalStatusDef(catId, defs);
+  renderAdminPanel();
+}
+
+function resetBuiltinCat(catId) {
+  resetGlobalStatusDef(catId);
+  showToast('Reset to default steps!', 'info');
   renderAdminPanel();
 }
 
