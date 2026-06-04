@@ -4,11 +4,16 @@
 
 let crmSearch = '';
 let crmTab = 'contacts'; // 'contacts' | 'blast'
+let crmViewMode = 'grid'; // 'list' | 'grid' | 'large' | 'xlarge'
+let crmFilters  = { race: '', gender: '', state: '', maritalStatus: '', tag: '', hasCases: '', birthdayDays: '' };
+let crmFilterOpen = false;
 
 function renderCRM() {
   document.getElementById('pageTitle').textContent = 'CRM Contacts';
   const contacts = getContacts();
-  const filtered = crmSearch.length >= 2 ? searchContacts(crmSearch) : contacts;
+  const searched = crmSearch.length >= 2 ? searchContacts(crmSearch) : contacts;
+  const displayContacts = applyCRMFilters(searched);
+  const activeFilters = activeCRMFilterCount();
 
   document.getElementById('content').innerHTML = `
     <div class="tab-bar mb-16" style="border-bottom:1px solid var(--border)">
@@ -23,19 +28,34 @@ function renderCRM() {
         <div class="stat-card"><div class="stat-icon" style="background:#F3E8FD">👤</div><div class="stat-num" style="color:var(--purple)">${contacts.filter(c=>getCasesForContact(c.id).some(x=>x.category==='recruitment'||x.category==='onboarding')).length}</div><div class="stat-label">Agents</div></div>
         <div class="stat-card"><div class="stat-icon" style="background:#FFE5EA">🎂</div><div class="stat-num" style="color:var(--pink)">${getUpcomingBirthdays(30).length}</div><div class="stat-label">Birthdays (30d)</div></div>
       </div>
-      <div class="flex items-center justify-between mb-16" style="flex-wrap:wrap;gap:8px">
-        <div class="search-bar" style="width:300px">
+      <!-- Toolbar -->
+      <div class="flex items-center mb-8" style="flex-wrap:wrap;gap:8px">
+        <div class="search-bar" style="width:260px">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" placeholder="Search contacts..." value="${escHtml(crmSearch)}" oninput="crmSearch=this.value;renderCRM()" />
         </div>
-        <div class="flex gap-8">
-          <button class="btn btn-secondary" onclick="exportToExcel()" title="Export all CRM data to Excel">📥 Export Excel</button>
+        <button class="btn btn-secondary btn-sm ${crmFilterOpen?'active':''}" onclick="crmFilterOpen=!crmFilterOpen;renderCRM()" style="white-space:nowrap">
+          🔽 Filters${activeFilters>0?` <span style="background:var(--blue);color:#fff;border-radius:10px;padding:0 6px;font-size:11px;font-weight:700;margin-left:4px">${activeFilters}</span>`:''}
+        </button>
+        ${renderCRMViewToggle()}
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn btn-secondary" onclick="importCRMExcel()" title="Import contacts from Excel / CSV">📤 Import</button>
+          <button class="btn btn-secondary" onclick="exportToExcel()" title="Export all CRM data to Excel">📥 Export</button>
           <button class="btn btn-primary" onclick="openNewContact()">+ New Contact</button>
         </div>
       </div>
-      ${filtered.length === 0
-        ? emptyState('👥', 'No contacts', crmSearch ? 'No results found' : 'Add your first contact')
-        : `<div class="grid-auto">${filtered.map(c => renderContactCard(c)).join('')}</div>`}
+      <!-- Active filter chips -->
+      ${renderCRMActiveChips()}
+      <!-- Filter panel -->
+      ${crmFilterOpen ? renderCRMFilterPanel() : ''}
+      <!-- Result count -->
+      <div class="text-xs text-muted mb-12" style="display:flex;align-items:center;gap:8px">
+        Showing ${displayContacts.length} of ${contacts.length} contacts
+        ${(activeFilters > 0 || crmSearch.length >= 2) ? `<button style="background:none;border:none;color:var(--red);cursor:pointer;font-size:11px;padding:0" onclick="crmSearch='';clearCRMFilters()">✕ Clear All</button>` : ''}
+      </div>
+      ${displayContacts.length === 0
+        ? emptyState('👥', 'No contacts', (crmSearch || activeFilters) ? 'No results match your filters' : 'Add your first contact')
+        : renderContactsByView(displayContacts)}
     </div>
 
     <div id="crm-blast-panel" style="display:${crmTab==='blast'?'block':'none'}">
@@ -48,6 +68,176 @@ function switchCRMTab(tab) {
   crmTab = tab;
   renderCRM();
   playClick();
+}
+
+/* ─── CRM Filters & View Mode ─── */
+function applyCRMFilters(contacts) {
+  return contacts.filter(c => {
+    if (crmFilters.race && c.race !== crmFilters.race) return false;
+    if (crmFilters.gender && c.gender !== crmFilters.gender) return false;
+    if (crmFilters.state && c.state !== crmFilters.state) return false;
+    if (crmFilters.maritalStatus && c.maritalStatus !== crmFilters.maritalStatus) return false;
+    if (crmFilters.tag && !(c.tags||[]).includes(crmFilters.tag)) return false;
+    if (crmFilters.hasCases === 'yes' && getCasesForContact(c.id).length === 0) return false;
+    if (crmFilters.hasCases === 'no' && getCasesForContact(c.id).length > 0) return false;
+    if (crmFilters.birthdayDays) {
+      const days = parseInt(crmFilters.birthdayDays);
+      const upcoming = getUpcomingBirthdays(days);
+      if (!upcoming.some(u => u.id === c.id)) return false;
+    }
+    return true;
+  });
+}
+
+function activeCRMFilterCount() {
+  return Object.values(crmFilters).filter(Boolean).length;
+}
+
+function clearCRMFilters() {
+  Object.keys(crmFilters).forEach(k => crmFilters[k] = '');
+  renderCRM();
+}
+
+function renderCRMActiveChips() {
+  const LABELS = { race: 'Race', gender: 'Gender', state: 'State', maritalStatus: 'Marital', tag: 'Tag', hasCases: '', birthdayDays: '' };
+  const valLabel = (k, v) => {
+    if (k === 'hasCases') return v === 'yes' ? 'Has Cases' : 'No Cases';
+    if (k === 'birthdayDays') return `🎂 Next ${v}d`;
+    return v;
+  };
+  const chips = Object.entries(crmFilters)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `<span class="crm-filter-chip" onclick="crmFilters['${k}']='';renderCRM()">${LABELS[k]?LABELS[k]+': ':''}${escHtml(valLabel(k,v))} ×</span>`)
+    .join('');
+  return chips ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">${chips}</div>` : '';
+}
+
+function renderCRMFilterPanel() {
+  const sel = (label, field, optKey) => {
+    const opts = getCRMOptions(optKey);
+    return `
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">${label}</div>
+        <select class="form-control" style="font-size:12px" onchange="crmFilters['${field}']=this.value;renderCRM()">
+          <option value="">All</option>
+          ${opts.map(o=>`<option value="${escHtml(o)}" ${crmFilters[field]===o?'selected':''}>${escHtml(o)}</option>`).join('')}
+        </select>
+      </div>`;
+  };
+  return `
+    <div class="crm-filter-panel mb-12">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px">
+        ${sel('Race / Ethnicity', 'race', 'races')}
+        ${sel('Gender', 'gender', 'genders')}
+        ${sel('State', 'state', 'states')}
+        ${sel('Marital Status', 'maritalStatus', 'maritalStatuses')}
+        ${sel('Tag / Label', 'tag', 'tags')}
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Has Cases</div>
+          <select class="form-control" style="font-size:12px" onchange="crmFilters.hasCases=this.value;renderCRM()">
+            <option value="">All</option>
+            <option value="yes" ${crmFilters.hasCases==='yes'?'selected':''}>Has Cases</option>
+            <option value="no" ${crmFilters.hasCases==='no'?'selected':''}>No Cases</option>
+          </select>
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">🎂 Upcoming Birthday</div>
+          <select class="form-control" style="font-size:12px" onchange="crmFilters.birthdayDays=this.value;renderCRM()">
+            <option value="">All</option>
+            <option value="7" ${crmFilters.birthdayDays==='7'?'selected':''}>This Week</option>
+            <option value="30" ${crmFilters.birthdayDays==='30'?'selected':''}>This Month</option>
+            <option value="90" ${crmFilters.birthdayDays==='90'?'selected':''}>Next 3 Months</option>
+          </select>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderCRMViewToggle() {
+  const modes = [
+    { id: 'list',   icon: '☰',  title: 'List' },
+    { id: 'grid',   icon: '⊞',  title: 'Grid' },
+    { id: 'large',  icon: '▦',  title: 'Large Icons' },
+    { id: 'xlarge', icon: '⊡',  title: 'Extra Large' }
+  ];
+  return `<div class="crm-view-toggle">${modes.map(m=>`<button class="crm-view-btn${crmViewMode===m.id?' active':''}" onclick="crmViewMode='${m.id}';renderCRM()" title="${m.title}">${m.icon}</button>`).join('')}</div>`;
+}
+
+function renderContactsByView(contacts) {
+  if (crmViewMode === 'list')   return `<div class="crm-list-view">${contacts.map(c=>renderContactRow(c)).join('')}</div>`;
+  if (crmViewMode === 'large')  return `<div class="crm-large-view">${contacts.map(c=>renderContactLarge(c)).join('')}</div>`;
+  if (crmViewMode === 'xlarge') return `<div class="crm-xlarge-view">${contacts.map(c=>renderContactXL(c)).join('')}</div>`;
+  return `<div class="grid-auto">${contacts.map(c=>renderContactCard(c)).join('')}</div>`;
+}
+
+function getContactBirthdayDays(contact) {
+  if (!contact.dob) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const dob = new Date(contact.dob);
+  const bday = new Date(today.getFullYear(), dob.getMonth(), dob.getDate());
+  if (bday < today) bday.setFullYear(today.getFullYear() + 1);
+  const diff = Math.round((bday - today) / 86400000);
+  return diff <= 30 ? diff : null;
+}
+
+function renderContactRow(contact) {
+  const cases = getCasesForContact(contact.id);
+  const cats = [...new Set(cases.map(c => c.category))];
+  const bday = getContactBirthdayDays(contact);
+  return `
+    <div class="crm-list-row" onclick="openContact('${contact.id}')">
+      <div class="contact-avatar" style="background:${getAvatarColor(contact.name)};width:36px;height:36px;font-size:13px;margin-bottom:0;flex-shrink:0">${getInitials(contact.name)}</div>
+      <div class="crm-list-main">
+        <div class="crm-list-name">${escHtml(contact.name)}</div>
+        <div class="crm-list-sub">${[contact.race, contact.gender, contact.phone?'📱 '+contact.phone:'', contact.stayArea?'📍 '+contact.stayArea:''].filter(Boolean).join(' · ')}</div>
+      </div>
+      <div class="crm-list-tags">${(contact.tags||[]).slice(0,3).map(t=>`<span class="contact-tag">${escHtml(t)}</span>`).join('')}</div>
+      <div class="crm-list-cases">${cats.map(cat=>`<span class="contact-case-chip" style="background:${catMeta(cat).bg};color:${catMeta(cat).color}">${catMeta(cat).icon}</span>`).join('')}</div>
+      <div style="width:64px;text-align:right;flex-shrink:0">${bday!==null?`<span style="font-size:11px;color:var(--pink)">🎂 ${bday===0?'Today':bday+'d'}</span>`:''}</div>
+    </div>`;
+}
+
+function renderContactLarge(contact) {
+  const cases = getCasesForContact(contact.id);
+  const cats = [...new Set(cases.map(c => c.category))];
+  const bday = getContactBirthdayDays(contact);
+  return `
+    <div class="contact-card crm-card-large" onclick="openContact('${contact.id}')">
+      <div style="display:flex;flex-direction:column;align-items:center;text-align:center">
+        <div class="contact-avatar" style="background:${getAvatarColor(contact.name)};width:64px;height:64px;font-size:24px;margin-bottom:10px">${getInitials(contact.name)}</div>
+        <div class="contact-name" style="font-size:13px;margin-bottom:2px">${escHtml(contact.name)}</div>
+        ${contact.race?`<div style="font-size:11px;color:var(--text-muted)">${escHtml(contact.race)}</div>`:''}
+        ${bday!==null?`<div style="font-size:11px;color:var(--pink)">🎂 ${bday===0?'Today!':bday+'d'}</div>`:''}
+        <div class="contact-cases" style="justify-content:center;margin-top:8px">
+          ${cats.map(cat=>`<span class="contact-case-chip" style="background:${catMeta(cat).bg};color:${catMeta(cat).color}">${catMeta(cat).icon}</span>`).join('')}
+        </div>
+        ${(contact.tags||[]).slice(0,2).length?`<div class="contact-tags" style="justify-content:center;margin-top:6px">${(contact.tags||[]).slice(0,2).map(t=>`<span class="contact-tag">${escHtml(t)}</span>`).join('')}</div>`:''}
+      </div>
+    </div>`;
+}
+
+function renderContactXL(contact) {
+  const cases = getCasesForContact(contact.id);
+  const cats = [...new Set(cases.map(c => c.category))];
+  const age = contact.dob ? ageFromDOB(contact.dob) : null;
+  const bday = getContactBirthdayDays(contact);
+  return `
+    <div class="contact-card crm-card-xlarge" onclick="openContact('${contact.id}')">
+      <div style="display:flex;flex-direction:column;align-items:center;text-align:center">
+        <div class="contact-avatar" style="background:${getAvatarColor(contact.name)};width:80px;height:80px;font-size:30px;margin-bottom:12px">${getInitials(contact.name)}</div>
+        <div style="font-size:16px;font-weight:700;margin-bottom:2px">${escHtml(contact.name)}</div>
+        ${age!==null?`<div style="font-size:12px;color:var(--text-muted);margin-bottom:2px">${age} yrs old</div>`:''}
+        ${(contact.gender||contact.race)?`<div style="font-size:11px;color:var(--text-muted)">${[contact.gender,contact.race].filter(Boolean).join(' · ')}</div>`:''}
+        ${contact.phone?`<div style="font-size:12px;margin-top:6px">📱 ${escHtml(contact.phone)}</div>`:''}
+        ${contact.stayArea?`<div style="font-size:11px;color:var(--text-muted)">📍 ${escHtml(contact.stayArea)}${contact.state?', '+escHtml(contact.state):''}</div>`:''}
+        ${bday!==null?`<div style="font-size:11px;color:var(--pink);margin-top:4px">🎂 ${bday===0?'Birthday Today!':'Birthday in '+bday+'d'}</div>`:''}
+        <div class="contact-cases" style="justify-content:center;margin-top:10px">
+          ${cats.map(cat=>`<span class="contact-case-chip" style="background:${catMeta(cat).bg};color:${catMeta(cat).color}">${catMeta(cat).icon} ${catMeta(cat).label}</span>`).join('')}
+        </div>
+        ${(contact.tags||[]).length?`<div class="contact-tags" style="justify-content:center;margin-top:6px">${(contact.tags||[]).map(t=>`<span class="contact-tag">${escHtml(t)}</span>`).join('')}</div>`:''}
+        <div class="text-xs text-muted mt-8">${cases.length} case${cases.length!==1?'s':''}</div>
+      </div>
+    </div>`;
 }
 
 function getUpcomingBirthdays(days) {
@@ -435,11 +625,12 @@ function saveContact(existingId = '') {
   if (existingId) {
     updateContact(existingId, data);
     showToast('Contact updated!', 'success');
+    if (typeof playSave === 'function') playSave();
   } else {
     createContact(data);
     showToast('Contact created!', 'success');
+    if (typeof playCreate === 'function') playCreate();
   }
-  playSuccess();
   closeContactModalBtn();
   renderCRM();
 }
@@ -477,7 +668,183 @@ async function deleteContactConfirm(id) {
   if (!ok) return;
   deleteContact(id);
   showToast('Contact deleted', 'info');
+  if (typeof playDelete === 'function') playDelete();
   closeContactModalBtn();
+  renderCRM();
+}
+
+/* ============================================
+   CRM EXCEL IMPORT
+   ============================================ */
+
+const CRM_IMPORT_COL_MAP = {
+  name:            ['name','full name','nama','contact name','nama penuh'],
+  phone:           ['phone','phone number','mobile','tel','no tel','no. tel','hp','handphone','nombor telefon','telefon'],
+  email:           ['email','e-mail','email address','mel elektronik'],
+  nric:            ['nric','ic','ic number','no ic','no. ic','mykad','kad pengenalan'],
+  dob:             ['dob','date of birth','birth date','tarikh lahir','birthday'],
+  race:            ['race','ethnicity','bangsa','kaum'],
+  gender:          ['gender','sex','jantina'],
+  religion:        ['religion','agama'],
+  state:           ['state','negeri'],
+  stayArea:        ['area','stay area','city','bandar','kawasan','location'],
+  maritalStatus:   ['marital status','marital','status kahwin','status perkahwinan'],
+  occupation:      ['occupation','job','profession','pekerjaan','jawatan'],
+  jobType:         ['job type','employment type','jenis pekerjaan','employment'],
+  income:          ['income','monthly income','pendapatan','salary','gaji'],
+  langPref:        ['language','lang','language preference','bahasa','bahasa pilihan'],
+  notes:           ['notes','remarks','note','comment','catatan','remark'],
+  tags:            ['tags','label','labels','tag'],
+  existingInsurance: ['insurance','existing insurance','insurans','current insurance'],
+  referralSource:  ['referral','referral source','sumber','referred by','source'],
+  socialMedia:     ['social media','social','fb','ig','tiktok','instagram','facebook'],
+};
+
+let _importPending = null;
+
+function importCRMExcel() {
+  if (typeof XLSX === 'undefined') {
+    showToast('Excel library not loaded — please wait a moment and retry.', 'error');
+    return;
+  }
+  document.getElementById('crmImportInput').click();
+}
+
+function handleCRMImportFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      if (!rows || rows.length < 2) { showToast('No data found in file', 'error'); playError && playError(); return; }
+      _showImportPreview(rows);
+    } catch(err) {
+      showToast('Failed to read file: ' + (err.message || 'Unknown error'), 'error');
+      if (typeof playError === 'function') playError();
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  input.value = '';
+}
+
+function _mapImportHeaders(headers) {
+  const map = {};
+  headers.forEach((h, i) => {
+    const lower = String(h || '').toLowerCase().trim();
+    if (!lower) return;
+    for (const [field, synonyms] of Object.entries(CRM_IMPORT_COL_MAP)) {
+      if (synonyms.includes(lower) && !(field in map)) { map[field] = i; break; }
+    }
+  });
+  return map;
+}
+
+function _showImportPreview(rows) {
+  const headers = rows[0].map(h => String(h || '').trim());
+  const dataRows = rows.slice(1).filter(r => r.some(c => c !== '' && c !== null && c !== undefined));
+  const colMap = _mapImportHeaders(headers);
+
+  if (!('name' in colMap)) {
+    showToast('Could not find a "Name" column. Ensure your file has a "Name" or "Full Name" column.', 'error');
+    if (typeof playError === 'function') playError();
+    return;
+  }
+
+  _importPending = { rows: dataRows, colMap };
+
+  const mappedFields = Object.keys(colMap);
+  const preview = dataRows.slice(0, 5);
+  const unmapped = headers.filter((_, i) => !Object.values(colMap).includes(i)).filter(Boolean);
+
+  document.getElementById('contactModalTitle').textContent = `📥 Import ${dataRows.length} Contact${dataRows.length !== 1 ? 's' : ''}`;
+  document.getElementById('contactModalBody').innerHTML = `
+    <!-- Recognized columns -->
+    <div style="margin-bottom:14px">
+      <div style="font-size:12px;font-weight:700;color:var(--green);margin-bottom:6px">✅ ${mappedFields.length} column${mappedFields.length!==1?'s':''} recognized</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px">
+        ${mappedFields.map(f=>`<span style="background:rgba(0,199,112,0.1);border:1px solid rgba(0,199,112,0.28);border-radius:10px;padding:2px 10px;font-size:11px;font-weight:600;color:var(--green)">${escHtml(f)}</span>`).join('')}
+      </div>
+      ${unmapped.length?`<div style="font-size:11px;color:var(--text-muted)">Skipped columns: ${unmapped.map(h=>`"${escHtml(h)}"`).join(', ')}</div>`:''}
+    </div>
+
+    <!-- Preview table -->
+    <div style="margin-bottom:14px">
+      <div style="font-size:12px;font-weight:700;margin-bottom:6px">Preview (first ${preview.length} of ${dataRows.length} rows)</div>
+      <div style="overflow-x:auto;border-radius:8px;border:1px solid var(--border)">
+        <table class="compact-table" style="font-size:11px;min-width:100%">
+          <thead><tr>${mappedFields.map(f=>`<th>${escHtml(f)}</th>`).join('')}</tr></thead>
+          <tbody>
+            ${preview.map(row=>`<tr>${mappedFields.map(f=>`<td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(String(row[colMap[f]]??'').slice(0,40))}</td>`).join('')}</tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Info box -->
+    <div style="background:rgba(10,124,255,0.07);border:1px solid rgba(10,124,255,0.15);border-radius:10px;padding:11px 14px;margin-bottom:16px;font-size:12px;line-height:1.6">
+      ℹ️ <strong>${dataRows.length}</strong> contact${dataRows.length!==1?'s':''} will be created. Existing contacts are not affected.<br>
+      <span style="color:var(--text-muted)">Tips: Tags &amp; Insurance columns accept comma-separated values (e.g. "VIP, Hot Lead"). Duplicate names are allowed.</span>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeContactModalBtn()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmCRMImport()">
+        📥 Import ${dataRows.length} Contact${dataRows.length!==1?'s':''}
+      </button>
+    </div>
+  `;
+  openModal('contactModal');
+}
+
+function confirmCRMImport() {
+  if (!_importPending) return;
+  const { rows, colMap } = _importPending;
+  _importPending = null;
+
+  const val = (row, field) => {
+    if (!(field in colMap)) return '';
+    const raw = row[colMap[field]];
+    if (raw instanceof Date) return raw.toISOString().split('T')[0];
+    return String(raw ?? '').trim();
+  };
+
+  let created = 0;
+  for (const row of rows) {
+    const name = val(row, 'name');
+    if (!name) continue;
+    const tags = val(row,'tags') ? val(row,'tags').split(',').map(t=>t.trim()).filter(Boolean) : [];
+    const existingInsurance = val(row,'existingInsurance') ? val(row,'existingInsurance').split(',').map(i=>i.trim()).filter(Boolean) : [];
+    createContact({
+      name,
+      phone:          val(row,'phone'),
+      email:          val(row,'email'),
+      nric:           val(row,'nric'),
+      dob:            val(row,'dob'),
+      race:           val(row,'race'),
+      gender:         val(row,'gender'),
+      religion:       val(row,'religion'),
+      state:          val(row,'state'),
+      stayArea:       val(row,'stayArea'),
+      maritalStatus:  val(row,'maritalStatus'),
+      occupation:     val(row,'occupation'),
+      jobType:        val(row,'jobType'),
+      income:         val(row,'income'),
+      langPref:       val(row,'langPref'),
+      notes:          val(row,'notes'),
+      referralSource: val(row,'referralSource'),
+      socialMedia:    val(row,'socialMedia'),
+      tags,
+      existingInsurance
+    });
+    created++;
+  }
+
+  closeContactModalBtn();
+  showToast(`✅ ${created} contact${created!==1?'s':''} imported!`, 'success');
+  if (typeof playComplete === 'function') playComplete();
   renderCRM();
 }
 

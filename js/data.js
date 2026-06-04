@@ -111,12 +111,50 @@ function deleteContact(id) {
 }
 
 function searchContacts(q) {
-  const lower = q.toLowerCase();
-  return DB.contacts.filter(c =>
-    c.name.toLowerCase().includes(lower) ||
-    (c.phone || '').includes(lower) ||
-    (c.email || '').toLowerCase().includes(lower)
-  );
+  const lower = q.toLowerCase().trim();
+  if (!lower) return DB.contacts;
+  const has = (val) => val && String(val).toLowerCase().includes(lower);
+  return DB.contacts.filter(c => {
+    // Core identity
+    if (has(c.name))           return true;
+    if (has(c.phone))          return true;
+    if (has(c.email))          return true;
+    if (has(c.nric))           return true;
+    // Profile fields
+    if (has(c.race))           return true;
+    if (has(c.gender))         return true;
+    if (has(c.state))          return true;
+    if (has(c.stayArea))       return true;
+    if (has(c.maritalStatus))  return true;
+    if (has(c.occupation))     return true;
+    if (has(c.jobType))        return true;
+    if (has(c.income))         return true;
+    if (has(c.langPref))       return true;
+    if (has(c.religion))       return true;
+    if (has(c.referralSource)) return true;
+    if (has(c.socialMedia))    return true;
+    if (has(c.notes))          return true;
+    // Tags / labels
+    if ((c.tags || []).some(t => has(t)))                                                return true;
+    // Existing insurance
+    if (Array.isArray(c.existingInsurance) && c.existingInsurance.some(i => has(i)))    return true;
+    // Linked cases
+    const cases = getCasesForContact(c.id);
+    for (const cs of cases) {
+      if (has(cs.label))      return true;
+      if (has(cs.subLabel))   return true;
+      if (has(cs.category))   return true;
+      if (has(cs.remarks))    return true;
+      if (has(cs.nextStep))   return true;
+      // Case tags
+      if ((cs.tags || []).some(t => has(t)))                                             return true;
+      // Status label
+      if (has(getStatusLabel(cs.category, cs.currentStatus, cs)))                        return true;
+      // Status history remarks
+      if ((cs.statusHistory || []).some(h => has(h.remark)))                             return true;
+    }
+    return false;
+  });
 }
 
 /* ---------- CASES ---------- */

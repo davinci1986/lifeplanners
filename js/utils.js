@@ -35,12 +35,14 @@ function closeConfirm(result) {
 function openModal(id) {
   const el = document.getElementById(id);
   if (el) { el.classList.add('open'); document.body.style.overflow = 'hidden'; }
+  if (typeof playOpen === 'function') playOpen();
 }
 function closeModal(id) {
   const el = document.getElementById(id);
   if (el) el.classList.remove('open');
   const anyOpen = document.querySelector('.modal-overlay.open');
   if (!anyOpen) document.body.style.overflow = '';
+  if (typeof playClose === 'function') playClose();
 }
 function closeCaseModal(e) { if (e.target === document.getElementById('caseModal')) closeCaseModalBtn(); }
 function closeCaseModalBtn() { closeModal('caseModal'); }

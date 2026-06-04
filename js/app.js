@@ -240,6 +240,7 @@ function onLocalAuthReady() {
   }
   navigateTo('dashboard');
   updateBadges();
+  if (typeof updateSoundBtn === 'function') updateSoundBtn();
   setTimeout(checkRemindersOnLoad, 1500);
 }
 
