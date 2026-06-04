@@ -18,7 +18,7 @@ Also read these key source files to understand current state:
 - C:\Users\Keith\todo-dashboard\js\utils.js
 - C:\Users\Keith\todo-dashboard\js\crm.js
 - C:\Users\Keith\todo-dashboard\js\sales.js
-- C:\Users\Keith\todo-dashboard\js\aisolution.js
+- C:\Users\Keith\todo-dashboard\js\sounds.js
 - C:\Users\Keith\todo-dashboard\js\app.js
 
 DO NOT write any code yet.
@@ -35,8 +35,13 @@ Explain the tech stack, data flow, auth flow, and how the modules connect.
 List:
 - Key conventions I must follow
 - Known bugs I must not repeat
-- Critical data structure changes from last session (existingInsurance as array, completedSteps[], insuranceFilter as array)
-- Patterns already in place I should use (not reinvent)
+- Critical data structure rules:
+  * existingInsurance is always an ARRAY — always Array.isArray() before use
+  * _blastFilter.insuranceFilter is [] not '' (unique exception)
+  * confirmSetStatusWithDate() calls toggleStepDone() NOT setStatus()
+  * completedSteps[] drives to-do mode, currentStatus = max done step
+  * claims.js, servicing.js, recruitment.js do NOT yet use to-do mode
+- Patterns already in place I should reuse (not reinvent)
 - The exact state of features (completed vs in-progress vs pending)
 
 ## 4. Current Project State
@@ -47,19 +52,19 @@ Top 5 things most likely to go wrong if I start coding carelessly.
 Pay special attention to:
 - existingInsurance being an ARRAY not a string
 - insuranceFilter being an ARRAY in _blastFilter (all other fields are strings)
-- confirmSetStatusWithDate() now calls toggleStepDone() not setStatus()
+- confirmSetStatusWithDate() calls toggleStepDone() not setStatus()
 - completedSteps[] drives to-do mode, currentStatus = max done step
-- claims/servicing/recruitment do NOT yet use to-do mode
+- claims.js/servicing.js/recruitment.js still use OLD linear rendering
 
 ## 6. Execution Plan
-Given the interrupted tasks from the last session, list exactly what I should implement next in priority order with file names and specific functions to modify.
+Given the pending tasks from the last session, list exactly what I should implement next in priority order with file names and specific functions to modify.
 
 The immediate pending tasks are:
-1. QUICK FIX — Gender field missing from CRM contact form (renderContactForm in crm.js + saveContact in crm.js)
-2. Migrate claims.js to use renderStatusStep() + completedSteps to-do mode
-3. Migrate servicing.js to use renderStatusStep() + completedSteps to-do mode
-4. Migrate recruitment.js to use renderStatusStep() + completedSteps to-do mode
-5. Team Dashboard flesh out (hierarchy view, agent stats)
+1. Migrate claims.js to renderStatusStep() + completedSteps to-do mode (reference: sales.js)
+2. Migrate servicing.js to to-do mode
+3. Migrate recruitment.js to to-do mode
+4. Team Dashboard: hierarchy view + agent stats
+5. Dashboard: pipeline chart and analytics widgets
 
 Only after providing the analysis above, ask for confirmation before beginning implementation.
 
@@ -75,13 +80,16 @@ Git commit: git -c user.name="Keith" -c user.email="chongwei1986@gmail.com" comm
 
 ## Notes for New Session
 
-- **SheetJS CDN** is loaded in index.html — `typeof XLSX !== 'undefined'` before using export
-- **Preview server** use `mcp__Claude_Preview__preview_start` with name `"lifeplanner"`
-- Use `preview_eval` to test JS functions in browser without reloading
-- Use `preview_screenshot` to verify UI changes
-- **existingInsurance** on contacts is an ARRAY — always `Array.isArray()` before using
+- **Glass design** — all cards use `var(--glass)` + `backdrop-filter: var(--glass-blur)`. Do NOT use hardcoded rgba() values for backgrounds.
+- **SheetJS CDN** loaded in index.html — check `typeof XLSX !== 'undefined'` before Excel operations
+- **Preview server** — use `mcp__Claude_Preview__preview_start` with name `"lifeplanner"`
+- **Screenshot tool** — `preview_screenshot` times out with glass CSS (backdrop-filter causes headless renderer hang). Use `preview_snapshot` or `preview_eval` to verify instead. This is NOT a production issue.
+- **existingInsurance on contacts** is an ARRAY — always `Array.isArray()` before using
 - **`_blastFilter.insuranceFilter`** is an array `[]`, not a string — unique in that object
 - **`confirmSetStatusWithDate()`** calls `toggleStepDone()` NOT `setStatus()` — do not revert
-- **claims.js, servicing.js, recruitment.js** still use OLD linear rendering — to-do mode NOT applied
-- **Gender field** exists in `DEFAULT_CRM_OPTIONS.genders` and `createContact()` but NOT in the contact form
-- Force push is blocked by Claude Code auto-mode — use merge strategy if needed
+- **claims.js, servicing.js, recruitment.js** still use OLD linear rendering — to-do mode NOT applied yet
+- **Gender field** exists in `DEFAULT_CRM_OPTIONS.genders` and contact form — verify still present in `renderContactForm()` in crm.js
+- **Sound toggle** — `updateSoundBtn()` must be called after login (it's in `localLogin()` in app.js)
+- **Import pending state** — `_importPending` module var in crm.js holds Excel import data between preview and confirm
+- **Git push** — always `master:main` (local=master, remote branch=main)
+- **Hard refresh** needed after push — GitHub Pages caches aggressively; tell user Ctrl+Shift+R

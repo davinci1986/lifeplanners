@@ -2,86 +2,112 @@
 
 ## What Was Accomplished This Session
 
-### Major Features Built & Pushed to Live (commit ad8ee5e)
+### 1. CRM Contacts — Filters
+- Added collapsible filter bar with 7 filters: Race, Gender, State, Marital Status, Tag/Label, Has Cases, Upcoming Birthday
+- Active filters show as removable chips with field labels
+- Filter count badge on Filters button
+- "Showing X of Y contacts" count with Clear All link
+- State persisted in `crmFilters{}` and `crmFilterOpen` module vars
 
-1. **Snapwill Customer Types** — Multi-select chip buttons (Will, Memories, Sub 199/299, Leader Account, Affiliate, Business Partner, School Donation, Booth). "+ Add" for custom types. Stored in `DB.settings.snapwillTypes` and `case.snapwillTypes[]`. Functions: `saveSnapwillTypes()`, `addNewSnapwillType()`, `getSnapwillTypes()`, `addSnapwillType()`.
+### 2. CRM Contacts — 4 View Modes
+- **☰ List**: dense rows (avatar + name/race/phone/area + tags + case icons + birthday)
+- **⊞ Grid**: original card layout (default)
+- **▦ Large Icons**: centered 64px avatar, name, race, case chips
+- **⊡ Extra Large**: 80px avatar + age + gender/race + phone + area + birthday + all details
+- View mode persisted in `crmViewMode` module var
+- Windows Explorer-style toggle buttons in toolbar
 
-2. **Label ID Bug Fixed** — `addCustomLabel()` now deduplicates by text. `addLabelToCategory()` injects radio button + auto-selects it so `saveNewCase()` captures the correct ID (not raw text). `saveNewCase()` also resolves `labelCustom` text → ID via DB lookup.
+### 3. CRM Contacts — Enhanced Search
+- Expanded `searchContacts()` in data.js from 3 fields to 20+ fields
+- Now searches: all profile fields, tags, existingInsurance, linked case labels/subLabels/categories, status labels, status history remarks, case notes/nextStep
 
-3. **AI Solution Module** — New `js/aisolution.js`. Fully custom per-case steps stored in `case.aiSteps[]`. Progress bar on list row. Inline step add/rename/delete. Date/remark on step completion. Functions: `renderAISolution()`, `openAISolutionCase()`, `handleAIStepClick()`, `addAIStepInline()`, `toggleAIStep()`, `renameAIStep()`, `deleteAIStep()` (in data.js).
+### 4. CRM Contacts — Excel/CSV Import
+- `📤 Import` button in toolbar → triggers hidden `<input type="file">`
+- SheetJS parses .xlsx/.xls/.csv
+- Smart column mapping: 20+ synonyms per field, English + Bahasa Malaysia headers
+- Preview modal: green chips for recognized columns, table of first 5 rows, count info
+- `_importPending` module var holds data between preview and confirm
+- Tags and Insurance parsed as comma-separated arrays on import
+- `confirmCRMImport()` calls `createContact()` for each valid row
 
-4. **To-Do List Progress Mode** — All status steps now work as independent checkboxes. `case.completedSteps[]` array stores done steps. `toggleStepDone()` in data.js. `handleStepClick()` in utils.js (entry point). `confirmSetStatusWithDate()` now calls `toggleStepDone()` instead of `setStatus()`. `renderCaseDetail()` in sales.js uses `completedSteps` for `isDone`/`isCurrent`. Branch buttons conditioned on `completedSteps.includes(N)`.
+### 5. Glass Premium Design System
+- Updated all CSS variables (--blue, --green, etc.) to more vibrant neon values
+- Added --accent gradient (blue→purple), --glass, --glass-blur, --glass-border, --glass-shadow vars
+- Body: mesh radial gradient background
+- All cards/modals: backdrop-filter glass effect
+- Stat cards: holographic shimmer animation (::after pseudo-element)
+- Buttons: gradient primary with glow shadow
+- Sidebar: dark gradient #0A0D1A → #0F1228
+- Mobile: reduced blur for performance
+- Status badges, reminder items, toasts, list rows all updated
 
-5. **CRM Extended Fields** — 11 new fields in contact form + detail view: Race, Religion, Gender (data only, form missing!), Language, Stay Area, State, Marital Status, Dependants, Job Type, Monthly Income, Existing Insurance (multi-select array), Referral Source, Social Media, Tags. All dropdown options stored in `DB.settings.crmOptions` via `getCRMOptions()` + `addCRMOption()`. `createContact()` updated to include all fields.
+### 6. Sound System — 12 Context-Aware Sounds
+- Rewrote sounds.js with 12 distinct Web Audio API sounds
+- `_sfx()` wrapper checks notifySound setting
+- Event delegation upgraded to distinguish: nav, open, close, filter, toggle, create, export
+- Added: `playNav()`, `playOpen()`, `playClose()`, `playCreate()`, `playSave()`, `playFilter()`, `playToggle()`, `playComplete()`, `playStepDone()`, `playBirthday()`, `playExport()`
+- Hooked `playOpen()`/`playClose()` into `openModal()`/`closeModal()` in utils.js
+- Hooked `playSave()`/`playCreate()`/`playDelete()` into crm.js contact actions
 
-6. **Bulk WhatsApp Blast** — CRM "📱 Bulk WhatsApp" tab. 19 templates in 2 groups (`WA_TEMPLATE_GROUPS`). Filters: Gender, Race, Religion, Area, State, Marital, Job, Income, Tag, Age range, Insurance (multi-select). Quick Select: 3 groups (By Occasion 10, By Profile 10, By Insurance 3). `generateWALinks()` produces personalised wa.me links.
-
-7. **Excel Export** — `js/export.js` with `exportToExcel()`. SheetJS CDN v0.20.3. 6 sheets: Summary, Contacts (25 fields), Cases, Activity History, Reminders, AI Solution. "📥 Export Excel" button in CRM header.
-
-8. **Admin: Built-in Category Step Editor** — New card in Admin Panel. Expand/collapse per category. Rename/add/remove steps. Global overrides via `DB.globalStatusDefs`. `getStatusDef()` checks these first. Reset to Default button.
-
-9. **Insurance Multi-Select in Bulk WhatsApp** — `_blastFilter.insuranceFilter` is an array. Checkbox chips for each company + "No Insurance" option. OR logic filter. `blastToggleInsurance()` function.
-
-10. **Extended WA Templates & Quick Select** — Added Christmas, Wesak, Raya Haji, Merdeka, Critical Illness, Medical Card, Retirement Planning, Mortgage Protection, Education Planning. Quick Select expanded to 3 organized groups.
+### 7. Sound Toggle
+- Speaker icon button in topbar (between search and reminders bell)
+- Toggles `DB.settings.notifySound` (default: true)
+- Icon swaps: 🔊 (on) / 🔇 (off), opacity 45% when off
+- Tooltip updates with state
+- `updateSoundBtn()` called from `localLogin()` in app.js
+- Hidden `<input type="file" id="crmImportInput">` added to index.html
 
 ---
 
 ## Major Decisions Made
 
-1. **To-do mode uses `completedSteps[]` + `currentStatus` = max done** — backward compatible display
-2. **`existingInsurance` changed to array** — always `Array.isArray()` check
-3. **`insuranceFilter` in `_blastFilter` is array `[]`** not string — unique among filter fields
-4. **`confirmSetStatusWithDate()` now calls `toggleStepDone()`** — replaces `setStatus()` for step clicks
-5. **`WA_TEMPLATE_GROUPS` + flat `WA_TEMPLATES`** — both maintained for grouped UI + template lookup
-6. **Gender field in data but not in form** — known gap, needs fixing next session
-7. **SheetJS via CDN** — no install, loaded before all scripts in index.html
+- Glass backdrop-filter CSS intentionally kept (beautiful in real browsers; preview tool screenshot limitation is not a production issue)
+- `_importPending` module variable chosen over onclick-embedded JSON (safer, no escaping issues)
+- Sound toggle uses `DB.settings.notifySound` (already existed) rather than a new setting key
+- Import column mapping done at parse time with generous synonym lists, not a user-configurable mapping UI
 
 ---
 
 ## Current Project Status
 
-- **Overall Completion:** ~88%
-- **All changes pushed to live** — commit ad8ee5e, GitHub Pages deployment complete
-- **Live URL:** https://davinci1986.github.io/lifeplanners/
+- **~82% complete**
+- Glass design deployed live ✅
+- CRM fully featured (filters, views, search, import, export, bulk WA) ✅
+- Sales + Onboarding on to-do mode ✅
+- Claims, Servicing, Recruitment still on old linear mode ❌ (next priority)
+- Team Dashboard: placeholder only ❌
+- Charts/analytics: not started ❌
 
 ---
 
 ## Current Blockers
 
-1. **Gender field missing from CRM contact form** — data structure ready, form field not added
-2. **claims.js, servicing.js, recruitment.js** — still use old linear step rendering; to-do mode not applied
-3. **Google Sheets scope** — unverified if spreadsheets scope enabled in Google Cloud Console
+None. All planned work for this session is complete and pushed to live.
 
 ---
 
 ## Immediate Next Task
 
-**Fix gender field in CRM contact form** — 10-minute fix:
+**Migrate claims.js to to-do mode** using `renderStatusStep()` + `completedSteps[]`, matching the pattern in sales.js.
 
-In `crm.js` → `renderContactForm()`, add to the extended fields section:
-```js
-// In the first form-row after race/religion:
-${renderCRMDropdown('cf_gender', 'genders', contact?.gender || '', 'Gender')}
-```
-
-In `crm.js` → `saveContact()`, add:
-```js
-gender: document.getElementById('cf_gender')?.value || '',
-```
-
-`DEFAULT_CRM_OPTIONS.genders` already has `['Male', 'Female', 'Non-binary', 'Prefer not to say']` in data.js. `createContact()` already has `gender: data.gender || ''`. Just the form field is missing.
+Steps:
+1. Read claims.js to understand current rendering
+2. Read sales.js `renderStatusStep()` function as reference
+3. Replace linear step buttons with `renderStatusStep()` calls
+4. Ensure `completedSteps[]` and `toggleStepDone()` are used
+5. Test: check/uncheck steps, verify currentStatus updates correctly
 
 ---
 
-## Recommended Development Order for Next Session
+## Recommended Development Order
 
-1. Fix gender field in CRM contact form (quick win, 10 min)
-2. Migrate claims.js to use `renderStatusStep()` + `completedSteps` to-do mode
-3. Migrate servicing.js to use `renderStatusStep()` + `completedSteps` to-do mode
-4. Migrate recruitment.js to use `renderStatusStep()` + `completedSteps` to-do mode
-5. Team Dashboard flesh out (hierarchy view, agent stats)
-6. PWA manifest + service worker for mobile install
-7. Password hashing
-8. Google Sheets real-time sync
-9. Bulk contact import from Excel
-10. Policy Summary PDF generation
+1. Migrate claims.js to to-do mode
+2. Migrate servicing.js to to-do mode
+3. Migrate recruitment.js to to-do mode
+4. Team Dashboard: hierarchy tree + per-agent stats
+5. Dashboard: pipeline chart (bar chart via Canvas API or SVG)
+6. Contact import: date format improvements
+7. CRM: bulk select + bulk actions
+8. Mobile: bottom tab navigation
+9. Dark mode toggle
+10. Charts: category distribution donut chart

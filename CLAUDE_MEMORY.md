@@ -2,190 +2,118 @@
 
 ## Assumptions
 
-1. **Team size:** ~5-20 people (Keith + agents). localStorage is sufficient.
-2. **Single active session per user:** No real-time collaboration. Last write wins.
-3. **Keith is always admin** — email: `chongwei1986@gmail.com`. Default login: `admin` / `admin`.
-4. **Malaysia-centric:** Working days = Mon–Fri. Date format DD/MM/YYYY display. WhatsApp dominates communication. Religious holidays matter for marketing.
-5. **No sensitive data regulations concern** — internal team tool, not a public consumer app.
-6. **Users trust each other** — client-side role enforcement is acceptable.
-7. **"Islam" is the exact string** stored for Muslim contacts' religion. Christmas template uses `blastQuickFilter('religion','Christianity')` — must match exactly.
+- The app is used exclusively by Keith and his AIA insurance agent team in Malaysia
+- Data volume is low: <500 contacts, <2,000 cases — no need for pagination or server DB
+- Users are non-technical — no error messages with stack traces, always friendly toasts
+- Mobile usage is secondary but must work — agents may view contacts on phone
+- Privacy is important — no analytics, no third-party tracking, URL is the access control
 
 ---
 
 ## Architectural Reasoning
 
-### Why no backend?
-Free forever on GitHub Pages. Google Sheets = cloud backup. Tradeoff (no real-time sync, client-side security) acceptable for trusted small team.
+### Why vanilla JS (no React/Vue)?
+Keith's team has no frontend dev background. The project was started as a simple tool and grew. No build step = easier deployment on GitHub Pages, no dependency hell, Keith can read and modify the code.
 
-### Why localStorage as primary DB?
-Works offline, instant reads/writes, no API latency. Google Sheets is backup, not primary.
+### Why localStorage (no Supabase/Firebase)?
+Zero cost, zero setup, works offline. For a team of <20 agents, localStorage per-user is sufficient. Google Drive sync provides the cloud backup if needed.
 
-### Why vanilla JS + global scope?
-No build pipeline = Keith can edit files directly on GitHub web editor. Global scope makes `onclick="fn()"` work in dynamically-generated HTML (primary rendering pattern).
+### Why innerHTML injection (not DOM APIs)?
+Faster to write complex UIs as template literals. The escHtml() guard prevents XSS. The codebase is already committed to this pattern throughout.
 
-### Why two auth systems?
-Google OAuth is technically superior but requires Keith to configure Client ID. Local auth works immediately. Plan: team uses local auth; Google auth only for Sheets sync.
-
-### Why to-do list mode instead of linear progress?
-User feedback: forced sequential steps don't match real insurance workflows. Keith may visit client, close deal (step 5), then backfill earlier steps. Flexibility is key. `completedSteps[]` tracks actual state; `currentStatus` = max done for backward-compatible display.
-
-### Why `existingInsurance` as an array?
-Clients often have insurance from multiple companies. Multi-select better reflects reality. Always use `Array.isArray()` check — old contacts may have string value.
+### Why one CSS file?
+Simplicity. All components are defined in one place, easy to search, no import issues.
 
 ---
 
 ## Business Decisions
 
-1. **Snapwill is a separate module** — distinct from AIA. Keith sells both.
-2. **Onboarding is multi-status** — unlike all other modules (parallel tracks).
-3. **Auto-transfer Recruitment → Onboarding** — when candidate agrees (step 5), onboarding case auto-created.
-4. **WhatsApp is primary communication** — WA scripts in 3 languages on every case.
-5. **Labels are separate from categories** — sub-types within a category (B1-B5 for Claims, etc.).
-6. **KIV** = "Keep In View" — Malaysian insurance industry term for pending/hold.
-7. **Bulk WhatsApp is zero-cost** — wa.me links open WhatsApp Web with pre-filled message. User clicks each link manually. No API, no cost.
-8. **19 WA templates** — grouped as Festive (9) and Sales & Follow-Up (10). Organised in `WA_TEMPLATE_GROUPS` (grouped) and `WA_TEMPLATES` (flat array for backward compat).
-9. **Excel export** uses SheetJS CDN — no npm package, no build step. Loaded in index.html.
-10. **CRM options are extensible** — all dropdown lists in `DB.settings.crmOptions` override `DEFAULT_CRM_OPTIONS`. Use `getCRMOptions(field)` always.
-11. **Global status overrides** — admin can rename built-in category steps. Stored in `DB.globalStatusDefs`. `getStatusDef()` checks this first. `resetGlobalStatusDef()` removes override.
+- **AIA-only branding**: Keith is an AIA agent. The app mentions AIA in insurance dropdowns but is generic enough for other companies.
+- **Malaysian language support**: CRM import supports Bahasa Malaysia column names (Nama, No Tel, Bangsa, etc.)
+- **Festive WhatsApp templates**: Malay/Chinese/Indian/Christian holidays are all in the Bulk WhatsApp module — reflects Malaysian multicultural market
+- **No public registration**: Only Keith can add team members via the Admin Panel
 
 ---
 
 ## Design Tradeoffs
 
-| Decision | Tradeoff |
-|----------|----------|
-| Plaintext passwords | Simple but insecure if device compromised |
-| Global JS functions | Easy onclick handlers but pollutes global namespace |
-| innerHTML rendering | Fast but requires escHtml() discipline |
-| localStorage primary | Works offline but 5MB limit |
-| No bundler | Simpler but 25 script files loaded sequentially |
-| completedSteps[] | Flexible to-do mode but currentStatus now means "max done", not "current active" |
-| existingInsurance as array | Accurate multi-company tracking but breaks old string assumptions |
-| SheetJS via CDN | No install needed but adds 500KB network request |
-| wa.me links | Zero cost but requires manual click per contact |
+### Glass design + backdrop-filter
+- Beautiful on real browsers (Chrome, Safari, Firefox)
+- **BREAKS headless screenshot tools** (preview_screenshot times out) — this is a known tool limitation, NOT a bug in the app
+- Mobile blur reduced to 10px to avoid GPU overload on low-end phones
+
+### To-do mode vs linear mode
+- **Sales and Onboarding**: to-do mode — user can check/uncheck steps in any order, date+remark per step
+- **Claims, Servicing, Recruitment**: still on old linear mode — buttons advance status sequentially
+- Reason for inconsistency: to-do mode was added mid-project and not yet backported to all modules
+
+### Inline onclick handlers
+- Trade-off: tightly couples template generation with JS function names
+- Benefit: much simpler than maintaining event listener registrations for dynamically rendered content
+- Risk: function name changes break inline handlers without compile-time errors
 
 ---
 
 ## Workarounds
 
-### The navigateTo Override Bug (FIXED, long ago)
-**Problem:** Two `function navigateTo()` declarations. Due to JS hoisting, the second wins → infinite recursion.
-**Fix:** Removed the override. Inlined role-based nav visibility check into original.
-**Rule:** NEVER declare two functions with the same name in global scope.
+### existingInsurance legacy migration
+Old contacts created before the array change have `existingInsurance` as a string. `data.js createContact()` normalizes it to array, but UPDATE paths don't always re-normalize. Always use `Array.isArray()` check before any array operation.
 
-### findLastIndex Safari Compatibility
-`Array.prototype.findLastIndex` not in older Safari. Workaround:
-```js
-const idx = arr.findLastIndex ? arr.findLastIndex(fn) : arr.map(fn).lastIndexOf(true);
-```
-Apply this pattern anywhere `findLastIndex` is needed.
-
-### Insurance Array Migration
-Old contacts have `existingInsurance` as a string (e.g. `'AIA'`). New contacts have it as array `['AIA']`.
-`createContact` now stores as array. `updateContact` uses spread so old string stays if not updated.
-Handle in display: `Array.isArray(c.existingInsurance) ? c.existingInsurance.join(', ') : c.existingInsurance`
-Excel export handles this with `_ins(val)` helper.
-
-### `_blastFilter` Mixed Types
-`_blastFilter.insuranceFilter` is an ARRAY `[]`, all other filter fields are strings `''`.
-`blastClearFilters()` handles this:
+### _blastFilter.insuranceFilter as array
+All other blast filter fields are strings cleared with `''`. This one is cleared with `[]`. The `blastClearFilters()` function uses:
 ```js
 Object.keys(_blastFilter).forEach(k => _blastFilter[k] = Array.isArray(_blastFilter[k]) ? [] : '');
 ```
+If you ever add a new blast filter field that's a string, the clear function handles it automatically.
 
-### GitHub Repo Structure Mismatch (Historical)
-The repo had files in `todo-dashboard/` subfolder. Fixed by updating workflow to deploy from `./` (root). Merged using `--allow-unrelated-histories -X ours`.
+### Modal re-use for import preview
+The contact modal (`#contactModal`) is reused for the Excel import preview. When `_showImportPreview()` opens it, `contactModalTitle` is set to "📥 Import X Contacts" and `contactModalBody` is replaced with preview HTML. `_importPending` module variable holds the parsed data between preview and confirm.
 
-### Local branch `master` → Remote branch `main`
-```powershell
-git push origin master:main
-```
-Always use this command. Never `git push origin master`.
+### Sound system initialization timing
+`sounds.js` is loaded AFTER `data.js` in index.html script order. So `updateSoundBtn()` cannot be called from `loadDB()` (sounds.js not yet parsed). It's called instead from `localLogin()` in app.js, which runs after all scripts are loaded.
 
 ---
 
 ## Known Risks
 
-1. **Gender field missing from CRM form** (HIGH) — `DEFAULT_CRM_OPTIONS.genders` exists in data.js but the contact form doesn't have a gender dropdown. `createContact` has `gender: data.gender || ''` but no form field. Quick fix needed.
-
-2. **claims.js, servicing.js, recruitment.js don't use to-do mode** (MEDIUM) — These still use old linear inline HTML. `completedSteps` is ignored for these categories. Steps must be refactored to use `renderStatusStep()` + `handleStepClick()`.
-
-3. **Label bug in old data** (LOW) — Old cases with `label = 'text string'` (not an ID) still exist in localStorage. They work fine but show raw text. On next edit → save, they get resolved to proper ID.
-
-4. **Password security** (MEDIUM) — Plaintext in localStorage. Add hashing in future.
-
-5. **Concurrent session data loss** (LOW) — Two users editing simultaneously: last `saveDB()` wins.
-
-6. **Google Sheets scope** (MEDIUM) — May need `https://www.googleapis.com/auth/spreadsheets` confirmed in Google Cloud Console OAuth consent screen.
-
-7. **SheetJS CDN dependency** (LOW) — If CDN is down, Excel export fails. `exportToExcel()` checks `typeof XLSX !== 'undefined'` and shows toast error.
-
-8. **`currentStatus` meaning change** (MEDIUM) — In to-do mode, `currentStatus` = `Math.max(...completedSteps)`. In old linear mode, it was "current active step". Stats, badges, and `getStatusLabel()` displays may be slightly off for to-do mode cases.
+1. **localStorage quota (~5-10MB)**: At current growth, safe for years. But if users attach base64 images in notes, could fill quickly.
+2. **No password hashing**: Passwords in `lp_users` are plaintext in localStorage. Acceptable for internal team tool with no sensitive financial data.
+3. **No offline sync conflict resolution**: If two users edit the same contact offline then sync to Drive, last-save wins via `_lastSaved` timestamp.
+4. **Glass CSS on older Android browsers**: `backdrop-filter` not supported on older Chrome for Android (<76). Cards will look flat (white), not broken.
+5. **Import date formats**: Excel date cells parsed as JS Date objects (handled), but string dates like "15/06/1990" not auto-converted — DOB from IC auto-fill is the workaround.
 
 ---
 
-## Future Plans
+## Future Plans (from Keith's direction)
 
-1. Fix gender field in CRM contact form (highest priority quick win)
-2. Migrate claims/servicing/recruitment to to-do mode using `renderStatusStep()`
-3. PWA manifest + service worker for mobile install
-4. bcrypt password hashing
-5. Real-time sync via Google Sheets polling (every 30s)
-6. Push notifications via Web Push API
-7. Policy Summary PDF (jsPDF)
-8. Commission tracking module
-9. Agent recruitment funnel chart
-10. Bulk Excel contact import
-11. Team Dashboard flesh out (hierarchy view, agent stats)
-12. Archive/soft-delete old cases
-13. Scheduled WhatsApp/email reminders
-14. Agent performance PDF reports
+- Charts/graphs on dashboard (Keith mentioned "advanced charts")
+- Team dashboard with hierarchy and agent performance stats
+- Mobile-first redesign (bottom tab bar)
+- Dark mode
+- Possibly integrate with AIA's actual system APIs in future
 
 ---
 
 ## Hidden Context
 
-1. **"LifePlanner"** is an AIA term — refers to the AIA Life Planner (agent) role. "Be A Life Planner" (BALP) is the entry program for new agents.
-2. **RintiZ, Next Gen Millionaire, Next Gen Leader** are AIA recruitment programs.
-3. **PCIL, TBE (A&C), TBE ABC, PRS, General Insurance** — Malaysian insurance exam names required for licensing.
-4. **Snapwill** — separate from AIA. Digital will writing app. Keith sells/promotes both.
-5. **"Hotlist"** (20 Names Hotlist) — AIA industry term. New agents identify 20 potential clients in first week.
-6. **ANP** = Annual New Premium — monetary value of a closed insurance case.
-7. **Working days** in Malaysia = Monday–Friday (no public holiday tracking).
-8. **iCari** = `https://icari.com.my` — Malaysian insurance comparison portal. Keith recommends this to leads.
-9. **WA_TEMPLATE_GROUPS** is the grouped structure; **WA_TEMPLATES** is the flat array (flatMap of groups). Both must be kept in sync — the flat array is auto-derived from groups via `.flatMap(g => g.templates)`.
-10. **blastQuickFilter(field, value)** sets filter + calls `blastSelectAll()` + `refreshBlast()`. It does NOT auto-switch template — the caller must set `_blastTemplate` before calling refreshBlast().
-11. The `_blastSelected` Set persists across CRM tab switches within a session but resets on page reload.
-12. `LOCAL_AUTH` must be declared BEFORE `navigateTo` in app.js because navigateTo references it. It IS declared at the top of app.js — don't move it.
-
----
-
-## Lessons Learned
-
-1. **Function hoisting bites** — never have two `function X()` declarations in global scope
-2. **Test the preview after every major change** — use `preview_eval` to catch JS errors before push
-3. **`--allow-unrelated-histories`** for merging repos with different lineages
-4. **Force push to default branch blocked by Claude Code** — use merge strategy instead
-5. **PowerShell heredocs** use `@'...'@` not bash `<<'EOF'...EOF` syntax
-6. **Windows credential manager handles GitHub auth** — no need for PAT in .gitconfig
-7. **Mixed-type filter state** (`insuranceFilter: []` vs other fields `''`) — always handle with `Array.isArray()` check in `blastClearFilters()`
-8. **`existingInsurance` as array** — always check with `Array.isArray()` before `.join()` — old data may be a string
-9. **SheetJS `!freeze`** for header row is supported property name (not `!freezePane`)
-10. **`blastQuickFilter` then `refreshBlast()`** — the caller must set `_blastTemplate` BEFORE calling `refreshBlast()` or the template won't switch
+- The `NEW_SESSION_BOOTSTRAP.md` in the project root contains the exact prompt to paste into a new Claude Code session — always update this file when major features change
+- Git commit author must be: `git -c user.name="Keith" -c user.email="chongwei1986@gmail.com"`
+- Push command: `git push origin master:main` (local branch is `master`, remote is `main`)
+- After pushing, GitHub Pages takes 1–2 min to deploy. Users need Ctrl+Shift+R (hard refresh) to see changes.
+- The `todo-dashboard/todo-dashboard/` nested copy exists — always work in `C:\Users\Keith\todo-dashboard\` (the outer one with the live files)
+- SheetJS CDN: check `typeof XLSX !== 'undefined'` before any Excel operations
 
 ---
 
 ## Things Most Likely To Be Lost In A New Session
 
-1. **Gender field is missing from the contact form** — exists in data defaults but not rendered
-2. **`existingInsurance` is now an ARRAY** — breaking change from old string value
-3. **`insuranceFilter` in `_blastFilter` is an ARRAY `[]`** — not a string like other filter fields
-4. **`completedSteps[]` drives to-do mode** — `currentStatus` = max done, NOT active step
-5. **`WA_TEMPLATE_GROUPS` + `WA_TEMPLATES`** both exist — groups for UI, flat for template lookup
-6. **`getStatusDef()` checks `DB.globalStatusDefs` first** — built-in categories can be admin-overridden
-7. **Local git branch is `master`, remote is `main`** — push with `git push origin master:main`
-8. **`handleStepClick()` in utils.js** is the entry point for ALL step clicks — not `openSetStatusWithDate` directly
-9. **`confirmSetStatusWithDate()` now calls `toggleStepDone()`** — NOT `setStatus()` (breaking change from old session)
-10. **claims.js, servicing.js, recruitment.js** still use OLD linear step rendering — to-do mode NOT yet applied to them
-11. **SheetJS CDN** must be loaded in index.html BEFORE all other scripts for export to work
-12. **`_ins(val)` helper** in export.js handles both string and array `existingInsurance`
+1. **existingInsurance is an ARRAY** — most likely gotcha for any new code touching insurance data
+2. **confirmSetStatusWithDate() calls toggleStepDone() NOT setStatus()** — critical, will break to-do mode if reverted
+3. **_blastFilter.insuranceFilter is [] not ''** — easy to accidentally reset to string
+4. **claims.js, servicing.js, recruitment.js are NOT yet on to-do mode** — don't add to-do logic there without full migration
+5. **Push is master:main** — not master:master or main:main
+6. **backdrop-filter causes screenshot timeouts in preview tool** — not a real browser issue
+7. **_importPending module variable** in crm.js holds Excel import state between preview and confirm steps
+8. **Sound system initialization order** — updateSoundBtn() called from localLogin() not loadDB()
+9. **Glass design vars** — --glass, --glass-blur, --glass-border, --glass-shadow, --accent are defined in :root and used throughout; don't use hardcoded rgba() values
+10. **Gender field** in contact form — was added in a prior session; verify `renderContactForm()` includes the gender dropdown before touching that function
