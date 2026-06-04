@@ -1391,6 +1391,7 @@ function processALPPEnrichment(records) {
   for (const rec of records) {
     const key = (rec.owner || '').toUpperCase().trim();
     if (!key || key === 'MONTHLY') continue; // skip bad entries
+    if (rec.error) continue; // skip timeout/error records with no data
     const score = [rec.phone, rec.email, rec.nric, rec.dob, rec.gender, rec.occupation, rec.employer, rec.nationality].filter(Boolean).length;
     if (!ownerMap[key] || score > ownerMap[key]._score) {
       ownerMap[key] = { ...rec, _score: score };
@@ -1400,7 +1401,8 @@ function processALPPEnrichment(records) {
   const contacts = getContacts();
   let updated = 0;
   let fieldsAdded = 0;
-  let notFound = [];
+  let created = 0;
+  const toCreate = [];
 
   // Fields that can be enriched (only filled if currently empty)
   const ENRICHABLE = ['phone','email','nric','dob','gender','occupation','employer','nationality'];
@@ -1413,7 +1415,8 @@ function processALPPEnrichment(records) {
     });
 
     if (!contact) {
-      notFound.push(rec.owner);
+      // Queue for new contact creation
+      toCreate.push(rec);
       continue;
     }
 
@@ -1431,7 +1434,7 @@ function processALPPEnrichment(records) {
     const policyNote = _buildPolicyNote(rec);
     if (policyNote) {
       const existing = (contact.notes || '').trim();
-      if (!existing.includes('AIA Policy')) {
+      if (!existing.includes(rec.policyNo)) {
         updates.notes = existing ? existing + '\n' + policyNote : policyNote;
         fieldsAdded++;
       }
@@ -1443,17 +1446,42 @@ function processALPPEnrichment(records) {
     }
   }
 
-  // Show result
-  const notFoundCount = notFound.length;
-  const msg = `✅ Enriched ${updated} contacts, ${fieldsAdded} fields filled${notFoundCount > 0 ? `. ${notFoundCount} names not matched.` : '.'}`;
-  showToast(msg, updated > 0 ? 'success' : 'warning');
-
-  if (notFoundCount > 0) {
-    console.log('[ALPP Enrich] Not matched in CRM:', notFound);
+  // Create new contacts for unmatched names
+  for (const rec of toCreate) {
+    const name = _toTitleCase(rec.owner || '');
+    if (!name) continue;
+    createContact({
+      name,
+      phone:       (rec.phone || '').trim(),
+      email:       (rec.email || '').toLowerCase().trim(),
+      nric:        (rec.nric || '').trim(),
+      dob:         (rec.dob || '').trim(),
+      gender:      (rec.gender || '').trim(),
+      occupation:  (rec.occupation || '').trim(),
+      employer:    (rec.employer || '').trim(),
+      nationality: (rec.nationality || '').trim(),
+      notes:       _buildPolicyNote(rec),
+      existingInsurance: []
+    });
+    created++;
   }
 
+  // Show result
+  const parts = [];
+  if (updated > 0) parts.push(`${updated} contacts enriched`);
+  if (created > 0) parts.push(`${created} new contacts created`);
+  if (fieldsAdded > 0) parts.push(`${fieldsAdded} fields filled`);
+  const msg = parts.length > 0
+    ? '✅ ' + parts.join(', ')
+    : '⚠️ No changes — all records already up to date';
+  showToast(msg, (updated > 0 || created > 0) ? 'success' : 'warning', 6000);
   if (typeof playSuccess === 'function') playSuccess();
   renderCRM();
+}
+
+// Convert "JOHN DOE BIN AHMAD" → "John Doe Bin Ahmad"
+function _toTitleCase(str) {
+  return str.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
 }
 
 /** Build a compact policy note string from a scraper record */
