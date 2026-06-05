@@ -89,6 +89,7 @@ function createContact(data) {
     gender: data.gender || '',
     religion: data.religion || '',
     existingInsurance: Array.isArray(data.existingInsurance) ? data.existingInsurance : (data.existingInsurance ? [data.existingInsurance] : []),
+    aiaPolicies: Array.isArray(data.aiaPolicies) ? data.aiaPolicies : [],
     referralSource: data.referralSource || '',
     socialMedia: data.socialMedia || '',
     createdAt: new Date().toISOString(),

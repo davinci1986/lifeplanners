@@ -342,6 +342,28 @@ function renderContactDetail(contact, cases) {
     ${contact.notes ? `<div class="info-row"><span class="info-label">Notes</span><span class="info-value">${escHtml(contact.notes)}</span></div>` : ''}
     ${contact.tags?.length ? `<div class="info-row"><span class="info-label">Tags</span><span class="info-value">${contact.tags.map(t=>`<span class="contact-tag">${escHtml(t)}</span>`).join(' ')}</span></div>` : ''}
 
+    ${Array.isArray(contact.aiaPolicies) && contact.aiaPolicies.length > 0 ? `
+    <div class="section-divider">AIA Policies (${contact.aiaPolicies.length})</div>
+    <div style="overflow-x:auto">
+      <table class="compact-table" style="font-size:12px">
+        <thead><tr>
+          <th>Policy No</th><th>Insured</th><th>Plan</th>
+          <th>Sum Assured</th><th>Annual Prem</th><th>Status</th><th>Since</th>
+        </tr></thead>
+        <tbody>
+          ${contact.aiaPolicies.map(p => `<tr>
+            <td style="font-family:monospace;font-size:11px">${escHtml(p.policyNo)}</td>
+            <td>${escHtml(p.insured||'—')}</td>
+            <td style="font-weight:600">${escHtml(p.planName||'—')}</td>
+            <td style="color:var(--blue)">${escHtml(p.sumAssured||'—')}</td>
+            <td style="color:var(--green)">${escHtml(p.annualPremium||'—')}</td>
+            <td><span class="status-badge ${p.policyStatus&&p.policyStatus.toLowerCase().includes('force')?'status-active':p.policyStatus&&p.policyStatus.toLowerCase().includes('lapse')?'status-overdue':''}">${escHtml(p.policyStatus||'—')}</span></td>
+            <td class="text-muted">${escHtml(p.commencedDate||'—')}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>` : ''}
+
     <div class="section-divider">Case History (${cases.length})</div>
     ${Object.entries(catGroups).map(([cat, catCases]) => `
       <div class="mb-12">
@@ -1368,7 +1390,10 @@ function enrichFromALPPFile() {
         const raw = JSON.parse(ev.target.result);
         const arr = Array.isArray(raw) ? raw : (Array.isArray(raw.value) ? raw.value : null);
         if (!arr) { showToast('Invalid ALPP JSON format', 'error'); return; }
-        processALPPEnrichment(arr);
+        // Auto-detect Pass 3 data (has _pass:3 or planName field)
+        const isPass3 = arr.length > 0 && (arr[0]._pass === 3 || 'planName' in arr[0]);
+        if (isPass3) processALPPPass3(arr);
+        else processALPPEnrichment(arr);
       } catch(err) {
         showToast('Could not parse JSON: ' + err.message, 'error');
       }
@@ -1476,6 +1501,71 @@ function processALPPEnrichment(records) {
     : '⚠️ No changes — all records already up to date';
   showToast(msg, (updated > 0 || created > 0) ? 'success' : 'warning', 6000);
   if (typeof playSuccess === 'function') playSuccess();
+  renderCRM();
+}
+
+/* ============================================
+   ALPP Pass 3 — Import Plan Details into aiaPolicies[]
+   ============================================ */
+function processALPPPass3(records) {
+  if (!records || records.length === 0) { showToast('No records in file', 'warning'); return; }
+
+  // Group all policy records by owner name (uppercase key)
+  const ownerMap = {};  // ownerKey → [{policyNo, insured, planName, sumAssured, annualPremium, policyStatus, commencedDate}]
+  for (const rec of records) {
+    const key = (rec.owner || '').toUpperCase().trim();
+    if (!key || key === 'MONTHLY') continue;
+    if (!ownerMap[key]) ownerMap[key] = [];
+    // Avoid duplicate policy numbers
+    if (!ownerMap[key].find(p => p.policyNo === rec.policyNo)) {
+      ownerMap[key].push({
+        policyNo:      rec.policyNo      || '',
+        insured:       rec.insured       || '',
+        planName:      (rec.planName     || '').trim(),
+        sumAssured:    (rec.sumAssured   || '').trim(),
+        annualPremium: (rec.annualPremium|| '').trim(),
+        policyStatus:  (rec.policyStatus || '').trim(),
+        commencedDate: (rec.commencedDate|| '').trim(),
+        nextDueDate:   (rec.nextDueDate  || '').trim(),
+      });
+    }
+  }
+
+  const contacts = getContacts();
+  let updated = 0;
+  let notFound = 0;
+
+  for (const [ownerKey, policies] of Object.entries(ownerMap)) {
+    // Match contact by name
+    const contact = contacts.find(c => {
+      const n = c.name.toUpperCase().trim();
+      return n === ownerKey || n.replace(/\s+/g,'') === ownerKey.replace(/\s+/g,'');
+    });
+    if (!contact) { notFound++; continue; }
+
+    // Merge into contact.aiaPolicies[] — add new policyNos only, never duplicate
+    const existing = Array.isArray(contact.aiaPolicies) ? contact.aiaPolicies : [];
+    const existingNos = new Set(existing.map(p => p.policyNo));
+    const toAdd = policies.filter(p => !existingNos.has(p.policyNo));
+
+    // Also ensure 'AIA' is in existingInsurance[]
+    const ins = Array.isArray(contact.existingInsurance) ? contact.existingInsurance : [];
+    const insUpdate = ins.includes('AIA') ? {} : { existingInsurance: [...ins, 'AIA'] };
+
+    if (toAdd.length > 0 || Object.keys(insUpdate).length > 0) {
+      updateContact(contact.id, {
+        aiaPolicies: [...existing, ...toAdd],
+        ...insUpdate,
+      });
+      updated++;
+    }
+  }
+
+  const msg = updated > 0
+    ? `✅ AIA plan details added to ${updated} contacts (${notFound} not matched)`
+    : `⚠️ No matches found — check names match CRM`;
+  showToast(msg, updated > 0 ? 'success' : 'warning', 6000);
+  if (typeof playSuccess === 'function' && updated > 0) playSuccess();
   renderCRM();
 }
 
