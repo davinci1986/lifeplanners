@@ -1,6 +1,6 @@
 # LifePlanner Pro — Claude Context
 
-**What:** Browser-only CRM + case management for Malaysian AIA insurance agents. No server. localStorage + optional Google Drive sync.
+**What:** Browser-only CRM + case management for Malaysian AIA insurance agents. No server. localStorage + Google Sheets auto-sync.
 
 **Live:** https://davinci1986.github.io/lifeplanners/
 **Local:** `C:\Users\Keith\todo-dashboard\`
@@ -12,17 +12,17 @@
 ## Stack
 Vanilla HTML/CSS/JS · SheetJS CDN · Web Audio API · GitHub Pages · No build step
 
-## Current State (~90%)
-- ✅ CRM: contacts, Bulk WhatsApp, Excel import/export, Glass design, 12 sounds
-- ✅ CRM: `employer` + `nationality` fields, `🔄 ALPP Enrich` (creates + enriches contacts from JSON)
-- ✅ Sales, Onboarding, Claims, Servicing, Recruitment: all in **to-do mode** (`completedSteps[]`)
-- ✅ Auto-reminders fire correctly when steps are checked (`checkStepAutoReminder`)
-- ✅ ALPP Pass 1 complete: 74 new contacts imported
-- ⏳ ALPP Pass 2: `alpp_scraper_pass2.js` ready — 93 remaining policies — **user about to run**
+## Current State (~93%)
+- ✅ CRM: 140 contacts, fully enriched (phone, IC, DOB, gender, nationality, occupation, employer)
+- ✅ ALPP Pass 1 + Pass 2 + targeted scrape: ALL COMPLETE
+- ✅ All case modules in **to-do mode** (`completedSteps[]`)
+- ✅ Auto-sync: `saveDB()` pushes to Google Sheets; login auto-pulls
+- ✅ Google token persisted in localStorage (survives browser close)
+- ⚠️ Google Sheets API needs enabling: project `638079686621` (gen-lang-client) → console.cloud.google.com
 - ❌ Team Dashboard, pipeline charts: not started
 
 ## Immediate Priority
-1. **ALPP Pass 2** — user runs `alpp_scraper_pass2.js` in Chrome DevTools on ALPP policy detail page → downloads `alpp_enriched_pass2_*.json` → import via 🔄 ALPP Enrich
+1. Enable Google Sheets API in Google Cloud Console → test auto-sync on iPad
 2. Team Dashboard (hierarchy tree + per-agent stats)
 3. Dashboard pipeline charts
 
@@ -33,6 +33,7 @@ Vanilla HTML/CSS/JS · SheetJS CDN · Web Audio API · GitHub Pages · No build 
 - Glass CSS: always `var(--glass)` — never hardcode `rgba()`
 - `backdrop-filter` hangs headless tools — use `preview_snapshot` not `preview_screenshot`
 - `updateSoundBtn()` in `localLogin()` only — not `loadDB()`
+- ALPP search button: `#ContentPlaceHolder1_btnEditSearch` — NOT `input[type=submit]` (hits PRINT)
 
 ## Before Writing Any Code
-Read: `PROJECT_HANDOFF.md` · `ARCHITECTURE.md` · `DEVELOPMENT_RULES.md` · `CLAUDE_MEMORY.md`
+Read: `PROJECT_HANDOFF.md` · `ARCHITECTURE.md` · `CLAUDE_MEMORY.md`

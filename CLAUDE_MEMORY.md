@@ -1,24 +1,24 @@
 # CLAUDE_MEMORY.md — LifePlanner Pro
 
-## The 5 Rules That Will Break Everything If Wrong
+## The 5 Rules That Break Everything If Wrong
 
 ```
 1. existingInsurance  → ALWAYS ARRAY. Array.isArray() before any use.
 2. confirmSetStatusWithDate() → toggleStepDone() NOT setStatus()
 3. _blastFilter.insuranceFilter → [] not ''
-4. All case modules now in to-do mode (completedSteps[])
+4. All case modules in to-do mode (completedSteps[])
 5. git push → master:main (not master:master)
 ```
 
 ---
 
-## Architecture Decisions (don't re-debate these)
+## Architecture Decisions (don't re-debate)
 
-**Vanilla JS + innerHTML** — no framework. Template literals + `escHtml()` everywhere.
-**One file per module** — don't create new JS files. New features go in the owning module.
-**DB singleton** — `DB` object in memory, `saveDB()` to persist. Always call after mutations.
-**Inline onclick** — `onclick="fn('${id}')"` in templates. No addEventListener for dynamic content.
-**Glass CSS** — `var(--glass)` + `var(--glass-blur)` on all cards/modals. Never hardcode `rgba()`.
+- **Vanilla JS + innerHTML** — no framework. Template literals + `escHtml()` everywhere.
+- **One file per module** — no new JS files. New features go in the owning module.
+- **DB singleton** — `DB` in memory, `saveDB()` to persist. Always call after mutations.
+- **Inline onclick** — `onclick="fn('${id}')"` in templates. No addEventListener for dynamic content.
+- **Glass CSS** — `var(--glass)` + `var(--glass-blur)` on all cards/modals. Never hardcode `rgba()`.
 
 ---
 
@@ -27,67 +27,84 @@
 ```js
 {
   id, ownerEmail, name, phone, email, nric, dob, occupation,
-  employer,       // ✅ from ALPP
-  nationality,    // ✅ from ALPP
+  employer, nationality,       // from ALPP enrichment
   notes, tags[],
   race, stayArea, state, maritalStatus, dependants,
   jobType, income, langPref, gender, religion,
-  existingInsurance[],  // ⚠️ ALWAYS ARRAY
+  existingInsurance[],         // ⚠️ ALWAYS ARRAY
   referralSource, socialMedia, createdAt, updatedAt
 }
 ```
 
 ---
 
-## To-Do Mode (ALL case modules now migrated)
+## To-Do Mode Flow (ALL modules)
 
 ```
 renderStatusStep(cs, stepDef, options)
   completedSteps.includes(stepDef.n)?
-    YES → green checked row (click to uncheck via handleStepClick)
+    YES → green checked (click to uncheck via handleStepClick)
     NO  → checkbox → handleStepClick → openSetStatusWithDate
               → confirmSetStatusWithDate(caseId, stepN)
                   → toggleStepDone()        ← NOT setStatus()
-                  → checkStepAutoReminder() ← fires autoReminder if defined on step
+                  → checkStepAutoReminder() ← fires if step.autoReminder defined
                   → currentStatus = Math.max(...completedSteps)
 ```
 
-**Modules in to-do mode:** sales ✅ · onboarding ✅ · claims ✅ · servicing ✅ · recruitment ✅
-
 **Recruitment special flow:**
-- Steps 1-3: normal checkboxes
-- After step 3: `renderConsiderChoices` → `handleConsiderChoice` → `toggleStepDone` (NOT setStatus)
+- After step 3: `renderConsiderChoices` → `handleConsiderChoice` → `toggleStepDone`
 - Step 5 (Agreed): auto-creates onboarding case via `checkAutoTransfer`
 - Step 6 (KIV): `reactivateFromKIV` removes step 6 from completedSteps
 
 ---
 
-## ALPP Scraper State
+## Auto-Sync (NEW — implemented this session)
 
-| Item | Value |
+```
+saveDB()
+  → localStorage write
+  → gdScheduleSave()           (Google Drive backup)
+  → syncLocalToSheets()        (Google Sheets push — if GAUTH.accessToken active)
+
+onLocalAuthReady() [local login]
+  → gauthInit() always runs on DOMContentLoaded
+  → restores token from localStorage (persists across browser close)
+  → 2s after login → pullTeamDataFromSheets() + startSheetsSync()
+
+Google token storage: localStorage (persistent) + sessionStorage (fast)
+Clear on: gauthSignOut() clears both
+```
+
+**⚠️ REQUIRED:** Google Sheets API must be enabled in Google Cloud project `638079686621` (gen-lang-client)
+URL: https://console.cloud.google.com/apis/library/sheets.googleapis.com?project=638079686621
+
+---
+
+## ALPP Scraper — Current State
+
+| Pass | Status |
 |---|---|
-| Pass 1 | COMPLETE — 199/199 done, 74 contacts created in CRM |
-| Pass 2 script | `alpp_scraper_pass2.js` (project root) |
-| Pass 2 storage key | `alpp_scrape_pass2` (Chrome localStorage on ALPP tab) |
-| Pass 2 target | 93 non-ILP/traditional policies |
-| Pass 2 status | User running — not yet complete |
+| Pass 1 (ILP, 199 policies) | ✅ COMPLETE — 74 contacts created |
+| Pass 2 (traditional, 93 policies) | ✅ COMPLETE — scraped via Chrome MCP |
+| Targeted (51 name-only contacts) | ✅ COMPLETE — enriched via processALPPEnrichment() |
 
-**Resume Pass 2:**
-1. Login ALPP → any policy detail page
-2. F12 → Console → paste `alpp_scraper_pass2.js` (auto-resumes from localStorage)
+**CRM current:** 140 contacts · 131 with phone · 129 with IC · 131 with occupation
 
-**Import result:**
-- CRM → **🔄 ALPP Enrich** → select `alpp_enriched_pass2_*.json`
-- Matches by name → enriches empty fields OR creates new contact if not found
+### ALPP Scraper Critical Learnings
+- Chrome MCP reaches `alpp.aia.com.my` — connect with `select_browser` (Browser 1 = user's Chrome)
+- **DO NOT use async loop** — Angular SPA kills JS context after form submit
+- **Use `window._step` self-scheduling pattern** with `setTimeout(window._step, 8000)` after each search
+- Search button: `#ContentPlaceHolder1_btnEditSearch` — NOT `input[type=submit]` (hits PRINT first)
+- Session extension popups: auto-click Extend via watchdog `setInterval` every 30s
+- `processALPPEnrichment()` format: `{policyNo, owner, phone, email, nric, dob, gender, nationality, occupation, employer}`
 
 ---
 
 ## ALPP Enrich Button — How It Works
-- File input `#crmImportInput` is shared between Excel import and ALPP JSON
-- `handleCRMImportFile` bails early if file is `.json` (fixed bug)
-- `processALPPEnrichment` deduplicates by owner name, enriches matched contacts, **creates new contacts** for unmatched ones
-- Names converted to Title Case on creation
-- Only fills EMPTY fields — never overwrites existing data
+- `processALPPEnrichment(records)` — matches by owner name (case-insensitive, uppercase trim)
+- Fills empty fields only — never overwrites existing data
+- Creates new contact if name not matched (Title Case name)
+- Can call directly via `javascript_tool` on LifePlanner tab — no file upload needed
 
 ---
 
@@ -96,21 +113,27 @@ renderStatusStep(cs, stepDef, options)
 ```
 loadDB()          → runs at bottom of data.js
 updateSoundBtn()  → localLogin() in app.js ONLY (not loadDB — sounds.js not loaded yet)
+gauthInit()       → always runs on DOMContentLoaded (not gated on local session)
 Script load order: data.js → utils.js → sounds.js → [page modules] → app.js
 ```
 
 ---
 
-## Tool Limitations (not app bugs)
+## Tool Notes (not app bugs)
 
-- `preview_screenshot` → hangs on `backdrop-filter` CSS — use `preview_snapshot`
-- Chrome = read-tier in computer-use — cannot click/type; use Claude-in-Chrome MCP instead
-- Chrome MCP cannot reach `alpp.aia.com.my` (DNS issue in MCP tab) — user must run scraper manually
+- `preview_screenshot` hangs on `backdrop-filter` — use `preview_snapshot`
+- Chrome MCP tab group is separate from user's Chrome tabs — use `select_browser('9752ede8...')` to connect
+- After Chrome MCP reconnects: always call `tabs_context_mcp` + `select_browser` before any tab action
+- ALPP `alpp_t2` localStorage key = targeted scraper state (51 contacts)
 
 ---
 
-## Pending Work (priority order)
+## Pending Work
 
-1. ⏳ ALPP Pass 2 completing (user running now) → import via 🔄 ALPP Enrich
-2. Team Dashboard: hierarchy + agent stats
-3. Dashboard pipeline charts
+| Priority | Task |
+|---|---|
+| 🔴 NOW | Enable Sheets API → test iPad sync |
+| 🟡 NEXT | Team Dashboard: hierarchy + per-agent stats (`dashboard.js`) |
+| 🟡 NEXT | Pipeline charts: bar + conversion rate (`dashboard.js`) |
+| 🟢 LATER | Security: hash passwords, encrypt DB, brute-force lockout |
+| 🟢 LATER | ALPP Pass 3: capture existingInsurance[] plan/premium details |
