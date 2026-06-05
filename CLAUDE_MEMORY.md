@@ -22,7 +22,29 @@
 
 ---
 
-## Contact Schema (data.js `createContact`)
+## Security Layer (NEW — implemented this session)
+
+```js
+// Password hashing (SubtleCrypto SHA-256, browser-native)
+hashPassword(pwd) → 'sha256:' + hexHash
+verifyPassword(input, stored) → bool  // handles both sha256: and legacy plaintext
+
+// Brute-force lockout
+localStorage['lp_lockout'] = { count, username, until }
+5 failures → 15 min lock → shown to user
+
+// Auto-logout
+startAutoLogout() / stopAutoLogout()
+30 min inactivity → localLogout() / gauthSignOut()
+Called from: onLocalAuthReady(), onAuthReady(), localLogout(), gauthSignOut()
+
+// saveUser() is now async — hashes password before storing
+// localLogin() is now async — verifies hash, auto-upgrades plaintext
+```
+
+---
+
+## Contact Schema (`data.js` `createContact`)
 
 ```js
 {
@@ -31,8 +53,20 @@
   notes, tags[],
   race, stayArea, state, maritalStatus, dependants,
   jobType, income, langPref, gender, religion,
-  existingInsurance[],         // ⚠️ ALWAYS ARRAY
+  existingInsurance[],         // ⚠️ ALWAYS ARRAY — insurer names e.g. ['AIA','Prudential']
+  aiaPolicies[],               // NEW — AIA policy details from Pass 3
   referralSource, socialMedia, createdAt, updatedAt
+}
+```
+
+### aiaPolicies[] entry format (from Pass 3)
+```js
+{
+  policyNo, insured, code,
+  name,          // plan name e.g. "A-LifeLink"
+  status,        // e.g. "In Force - Premium Paying"
+  sumAssured,    // e.g. "RM 54,500.00"
+  annualPremium  // e.g. "RM 2,400.00"
 }
 ```
 
@@ -41,7 +75,7 @@
 ## To-Do Mode Flow (ALL modules)
 
 ```
-renderStatusStep(cs, stepDef, options)
+renderStatusStep(c, stepDef, options)
   completedSteps.includes(stepDef.n)?
     YES → green checked (click to uncheck via handleStepClick)
     NO  → checkbox → handleStepClick → openSetStatusWithDate
@@ -58,7 +92,7 @@ renderStatusStep(cs, stepDef, options)
 
 ---
 
-## Auto-Sync (NEW — implemented this session)
+## Auto-Sync Architecture
 
 ```
 saveDB()
@@ -67,16 +101,30 @@ saveDB()
   → syncLocalToSheets()        (Google Sheets push — if GAUTH.accessToken active)
 
 onLocalAuthReady() [local login]
-  → gauthInit() always runs on DOMContentLoaded
-  → restores token from localStorage (persists across browser close)
-  → 2s after login → pullTeamDataFromSheets() + startSheetsSync()
+  → gauthInit() always on DOMContentLoaded
+  → restores token from localStorage silently
+  → 2s delay → pullTeamDataFromSheets() + startSheetsSync()
 
-Google token storage: localStorage (persistent) + sessionStorage (fast)
-Clear on: gauthSignOut() clears both
+Google token: localStorage (persistent) + sessionStorage (fast)
+Cleared on: gauthSignOut() clears both
 ```
 
-**⚠️ REQUIRED:** Google Sheets API must be enabled in Google Cloud project `638079686621` (gen-lang-client)
+**⚠️ REQUIRED:** Enable Google Sheets API in project `638079686621` (gen-lang-client)
 URL: https://console.cloud.google.com/apis/library/sheets.googleapis.com?project=638079686621
+
+---
+
+## Known Bugs (Pending Fix)
+
+### Bug #1 — Snapwill shows Claims progress
+- File: `snapwill.js`, function `openSnapwillCase()`, line ~55
+- Cause: `renderCaseDetail(c, contact)` uses `c.category` = `'claims'` for multi-category cases
+- Fix: `let body = renderCaseDetail({...c, category:'snapwill'}, contact);`
+
+### Bug #2 — Label shows random ID prefix
+- File: `sales.js`, function `renderNewCaseForm()`, line ~130
+- Cause: Radio button shows `${l.id} — ${l.label}` where `l.id` is a UID like `mpye0qpq...`
+- Fix: Change to `${l.label}` only in the display text
 
 ---
 
@@ -84,27 +132,48 @@ URL: https://console.cloud.google.com/apis/library/sheets.googleapis.com?project
 
 | Pass | Status |
 |---|---|
-| Pass 1 (ILP, 199 policies) | ✅ COMPLETE — 74 contacts created |
+| Pass 1 (ILP, ~200 policies) | ✅ COMPLETE — 74 contacts created |
 | Pass 2 (traditional, 93 policies) | ✅ COMPLETE — scraped via Chrome MCP |
 | Targeted (51 name-only contacts) | ✅ COMPLETE — enriched via processALPPEnrichment() |
+| **Pass 3 (plan details)** | 🟡 IN PROGRESS — ~6/199 done |
 
 **CRM current:** 140 contacts · 131 with phone · 129 with IC · 131 with occupation
 
-### ALPP Scraper Critical Learnings
-- Chrome MCP reaches `alpp.aia.com.my` — connect with `select_browser` (Browser 1 = user's Chrome)
-- **DO NOT use async loop** — Angular SPA kills JS context after form submit
-- **Use `window._step` self-scheduling pattern** with `setTimeout(window._step, 8000)` after each search
-- Search button: `#ContentPlaceHolder1_btnEditSearch` — NOT `input[type=submit]` (hits PRINT first)
-- Session extension popups: auto-click Extend via watchdog `setInterval` every 30s
-- `processALPPEnrichment()` format: `{policyNo, owner, phone, email, nric, dob, gender, nationality, occupation, employer}`
+### Pass 3 Scraper Critical Info
+- Script: `alpp_scraper_pass3.js` (paste into Chrome DevTools Console on ALPP detail page)
+- Chrome MCP: inject via `javascript_tool` using `window._step` pattern
+- ALPP now uses new Angular portal: `alpp_v2/pos/#/policy-enquiry-one-glance`
+- Policy detail page URL: navigate to Portal → Policy Status Enquiry → search by Policy Number → click result
+- Search form: `#ContentPlaceHolder1_txtPolNo` input + `#ContentPlaceHolder1_btnEditSearch` button ✅ confirmed working
+- State saved in `localStorage['alpp_p3']` — resumable after interruption
+- Import: CRM → 🔄 ALPP Enrich → select JSON → auto-detected as Pass 3 data
 
----
+### Pass 3 Extraction (confirmed working regex)
+```js
+// Captures: code, planName, status, sumAssured, annualPremium
+/([A-Z]{2,4}\d)\s+([\w\s\-\/\.&]+?)\s*[\n\r]+\s*\(([^)]+)\)[\s\S]*?(\d{1,3}(?:,\d{3})*\.\d{2})\t(\d{1,3}(?:,\d{3})*\.\d{2})/g
 
-## ALPP Enrich Button — How It Works
-- `processALPPEnrichment(records)` — matches by owner name (case-insensitive, uppercase trim)
-- Fills empty fields only — never overwrites existing data
-- Creates new contact if name not matched (Title Case name)
-- Can call directly via `javascript_tool` on LifePlanner tab — no file upload needed
+// Policy status
+/Policy Status\s+(IN FORCE[^\n\r]*|LAPSED[^\n\r]*|...)/i
+
+// Commencement date
+/Effective\s+Dt\s*:\s*(\d{1,2}\s+\w+\s+\d{4})/i
+```
+
+### Pick main plan = highest annual premium:
+```js
+const nonZero = allPlans.filter(x => x.annualPremium !== 'RM 0.00');
+const mainPlan = nonZero[0] || allPlans[0];
+```
+
+### Session watchdog (auto-extend ALPP session):
+```js
+setInterval(() => {
+  const b = [...document.querySelectorAll('button,a')]
+    .find(b => /extend|continue|stay/i.test(b.textContent));
+  if (b) b.click();
+}, 30000);
+```
 
 ---
 
@@ -124,16 +193,4 @@ Script load order: data.js → utils.js → sounds.js → [page modules] → app
 - `preview_screenshot` hangs on `backdrop-filter` — use `preview_snapshot`
 - Chrome MCP tab group is separate from user's Chrome tabs — use `select_browser('9752ede8...')` to connect
 - After Chrome MCP reconnects: always call `tabs_context_mcp` + `select_browser` before any tab action
-- ALPP `alpp_t2` localStorage key = targeted scraper state (51 contacts)
-
----
-
-## Pending Work
-
-| Priority | Task |
-|---|---|
-| 🔴 NOW | Enable Sheets API → test iPad sync |
-| 🟡 NEXT | Team Dashboard: hierarchy + per-agent stats (`dashboard.js`) |
-| 🟡 NEXT | Pipeline charts: bar + conversion rate (`dashboard.js`) |
-| 🟢 LATER | Security: hash passwords, encrypt DB, brute-force lockout |
-| 🟢 LATER | ALPP Pass 3: capture existingInsurance[] plan/premium details |
+- ALPP `alpp_p3` localStorage key = Pass 3 scraper state

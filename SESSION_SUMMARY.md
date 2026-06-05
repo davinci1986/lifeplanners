@@ -1,51 +1,59 @@
 # SESSION_SUMMARY.md — LifePlanner Pro
-**Date:** 2026-06-05
+**Date:** 2026-06-06
 
 ---
 
-## What Was Completed This Session
+## Completed This Session
 
-### 1. ALPP Data Scraping — FULLY COMPLETE
-| Pass | Status | Result |
-|---|---|---|
-| Pass 1 | ✅ DONE (prior) | 74 contacts created |
-| Pass 2 (93 policies) | ✅ DONE | Scraped via Chrome MCP injection |
-| Targeted (51 contacts) | ✅ DONE | Enriched directly into CRM via `processALPPEnrichment()` |
+### 1. Security Enhancements (`js/app.js`, `js/gauth.js`)
+- **SHA-256 password hashing** — SubtleCrypto (browser-native). Stored as `sha256:hex`. Auto-upgrades plaintext on first login.
+- **Brute-force lockout** — 5 failed attempts → 15 min lock. Counter in `localStorage['lp_lockout']`. Shows remaining attempts.
+- **Auto-logout** — 30 min inactivity. Resets on any mouse/key/touch event. Works for both local + Google login.
+- **Google login resilience** — `onAuthReady()` now wraps Sheets calls in try/catch. Still logs in if Sheets API not enabled (shows warning toast instead of failing silently).
+- **Role label fix** — `gauth.js` `getRoleLabel()` now handles both `dm`/`um` (local) and `district_manager`/`unit_manager` (Sheets).
 
-**CRM now:** 140 contacts · 131 with phone · 129 with IC/NRIC · 131 with occupation
+### 2. ALPP Pass 3 — Plan Detail Scraper
+- **`alpp_scraper_pass3.js`** — new scraper. Captures: plan name, sum assured, annual premium, total premium, policy status, commencement date for all ~199 unique policies.
+- **`processALPPPass3()`** in `crm.js` — imports Pass 3 JSON. Groups by owner, adds `aiaPolicies[]` to contact. Auto-detects Pass 3 data on import (checks for `planName` field).
+- **Contact detail view** — new "AIA Policies" table section shown when `aiaPolicies[]` is populated.
+- **`aiaPolicies[]`** added to `createContact` defaults in `data.js`.
+- **Portal discovery** — ALPP upgraded to new Angular portal (`alpp_v2/pos/`). Scrapers still work: `#ContentPlaceHolder1_txtPolNo` + `#ContentPlaceHolder1_btnEditSearch` exist on detail page.
+- **Extraction regex confirmed working:**
+  ```js
+  /([A-Z]{2,4}\d)\s+([\w\s\-\/\.&]+?)\s*[\n\r]+\s*\(([^)]+)\)[\s\S]*?(\d{1,3}(?:,\d{3})*\.\d{2})\t(\d{1,3}(?:,\d{3})*\.\d{2})/g
+  ```
+  Captures: plan code, plan name, status, sum assured, annual premium per plan.
 
-### 2. Auto-Sync Implemented
-- `saveDB()` → auto-pushes to Google Sheets on every save (if Google token active)
-- `gauthInit()` always runs on load — restores Google token silently
-- `onLocalAuthReady()` → auto-pulls from Sheets 2s after local login
-- Google token now stored in **localStorage** (persists across browser close/reopen)
-
-### 3. Files Changed & Pushed
-| File | Change |
-|---|---|
-| `js/data.js` | saveDB() calls syncLocalToSheets() when token active |
-| `js/app.js` | gauthInit() always runs; onLocalAuthReady() auto-pulls |
-| `js/gauth.js` | Token saved to localStorage + localStorage; cleared on sign-out |
+### 3. Pass 3 Scraper — In Progress
+- Injected `window._step` scraper into Chrome MCP tab (34068521)
+- ~6/199 policies scraped before session interrupted
+- State saved in `localStorage['alpp_p3']` on ALPP domain
+- Partial downloads every 25 policies; final download auto on completion
 
 ---
 
-## Pending / Next Session
+## Bugs Identified (NOT YET FIXED)
+
+### Bug #1 — Snapwill shows Claims progress steps
+- **Where:** `snapwill.js` `openSnapwillCase()` line 55
+- **Cause:** `renderCaseDetail(c, contact)` uses `c.category` = `'claims'`. Multi-category cases (claims+snapwill) show Claims steps in Snapwill view.
+- **Fix:** Pass `{...c, category:'snapwill'}` to `renderCaseDetail` in `openSnapwillCase`.
+
+### Bug #2 — Label picker shows random ID prefix
+- **Where:** `sales.js` `renderNewCaseForm()` ~line 130
+- **Cause:** Radio button label text is `${l.id} — ${l.label}`. IDs are UIDs like `mpye0qpqscm0n`.
+- **Fix:** Change display to just `${l.label}`.
+
+---
+
+## Pending Next Session
 
 | Priority | Task |
 |---|---|
-| 🔴 NOW | Enable Google Sheets API: [console.cloud.google.com](https://console.cloud.google.com/apis/library/sheets.googleapis.com?project=638079686621) → click **Enable** |
-| 🔴 NOW | Test Google login → verify auto-sync works on iPad |
-| 🟡 NEXT | Team Dashboard — hierarchy tree + per-agent stats (`dashboard.js`) |
-| 🟡 NEXT | Pipeline charts — bar chart + conversion rate (`dashboard.js`) |
-| 🟢 LATER | Security: hash passwords, encrypt DB, brute-force lockout |
-| 🟢 LATER | ALPP Pass 3: capture `existingInsurance[]` plan/premium details |
-
----
-
-## Key Learnings (ALPP Scraper)
-
-- Chrome MCP reaches `alpp.aia.com.my` when connected to Browser 1 via `select_browser`
-- Angular SPA kills async loops after form submit → use `window._step` self-scheduling pattern
-- ALPP search button: `#ContentPlaceHolder1_btnEditSearch` (NOT `input[type=submit]` — hits PRINT first)
-- Session extension dialogs: auto-click Extend via watchdog interval
-- `processALPPEnrichment()` accepts `{policyNo, owner, phone, email, nric, dob, gender, nationality, occupation, employer}` — only fills empty fields, never overwrites
+| 🔴 Fix now | Bug #1: Snapwill progress (snapwill.js line 55) |
+| 🔴 Fix now | Bug #2: Label ID prefix (sales.js ~line 130) |
+| 🔴 Keith action | Enable Sheets API: [console.cloud.google.com](https://console.cloud.google.com/apis/library/sheets.googleapis.com?project=638079686621) |
+| 🟡 Resume | ALPP Pass 3 scraping — restart `window._step` in ALPP tab, inject from `alpp_scraper_pass3.js` |
+| 🟡 Build | Team Dashboard: hierarchy tree + per-agent stats (`dashboard.js`) |
+| 🟡 Build | Pipeline charts: bar chart + conversion rate (`dashboard.js`) |
+| 🟢 Later | Security: DB encryption, auto-logout on Google session expiry |

@@ -12,19 +12,30 @@
 ## Stack
 Vanilla HTML/CSS/JS · SheetJS CDN · Web Audio API · GitHub Pages · No build step
 
-## Current State (~93%)
+## Current State (~95%)
 - ✅ CRM: 140 contacts, fully enriched (phone, IC, DOB, gender, nationality, occupation, employer)
-- ✅ ALPP Pass 1 + Pass 2 + targeted scrape: ALL COMPLETE
 - ✅ All case modules in **to-do mode** (`completedSteps[]`)
 - ✅ Auto-sync: `saveDB()` pushes to Google Sheets; login auto-pulls
-- ✅ Google token persisted in localStorage (survives browser close)
-- ⚠️ Google Sheets API needs enabling: project `638079686621` (gen-lang-client) → console.cloud.google.com
-- ❌ Team Dashboard, pipeline charts: not started
+- ✅ Security: SHA-256 password hashing, brute-force lockout (5 attempts → 15 min), auto-logout (30 min inactivity)
+- ✅ Google login: resilient error handling (still logs in if Sheets API not enabled)
+- ✅ ALPP Pass 3 scraper built (`alpp_scraper_pass3.js`) + `processALPPPass3()` import in CRM
+- ⚠️ Google Sheets API needs enabling: project `638079686621` → console.cloud.google.com
+- ❌ 2 bugs pending fix (see below)
 
 ## Immediate Priority
-1. Enable Google Sheets API in Google Cloud Console → test auto-sync on iPad
-2. Team Dashboard (hierarchy tree + per-agent stats)
-3. Dashboard pipeline charts
+1. Fix Bug #1: Snapwill shows Claims progress for multi-category cases
+2. Fix Bug #2: Label picker shows random ID prefix (`mpye0qpq...`) instead of clean label name
+3. Enable Google Sheets API → test sync on iPad
+4. Complete ALPP Pass 3 scraping (in progress, ~6/199 done)
+
+## Known Bugs (Unfixed)
+### Bug #1 — Snapwill shows wrong progress steps
+- **Root cause:** `renderCaseDetail(c, contact)` uses `c.category` which is `'claims'` (primary). When a case has `categories: ['claims','snapwill']`, Snapwill detail shows Claims steps.
+- **Fix:** In `snapwill.js` `openSnapwillCase()`, pass `{...c, category:'snapwill'}` to `renderCaseDetail`.
+
+### Bug #2 — Label picker shows random ID prefix
+- **Root cause:** In `sales.js` `renderNewCaseForm()` line ~130: `${l.id} — ${l.label}` shows the internal UID in the radio button label.
+- **Fix:** Change to just `${l.label}` in the radio button display text.
 
 ## Must-Know Rules
 - `existingInsurance` = **always ARRAY** — `Array.isArray()` before use
