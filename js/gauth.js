@@ -36,13 +36,18 @@ function gauthInit() {
   }
 
   // Try to restore session
-  const saved = sessionStorage.getItem('gauth_token');
-  const expiry = sessionStorage.getItem('gauth_expiry');
-  const user = sessionStorage.getItem('gauth_user');
+  // Try sessionStorage first (current session), then localStorage (persisted)
+  const saved = sessionStorage.getItem('gauth_token') || localStorage.getItem('gauth_token');
+  const expiry = sessionStorage.getItem('gauth_expiry') || localStorage.getItem('gauth_expiry');
+  const user = sessionStorage.getItem('gauth_user') || localStorage.getItem('gauth_user');
   if (saved && expiry && Date.now() < Number(expiry) && user) {
     GAUTH.accessToken = saved;
     GAUTH.tokenExpiry = Number(expiry);
     GAUTH.currentUser = JSON.parse(user);
+    // Sync to sessionStorage too
+    sessionStorage.setItem('gauth_token', saved);
+    sessionStorage.setItem('gauth_expiry', expiry);
+    sessionStorage.setItem('gauth_user', user);
     onAuthReady();
   }
 }
@@ -74,8 +79,11 @@ async function gauthOnToken(resp) {
   if (resp.error) { showLoginError(resp.error); return; }
   GAUTH.accessToken = resp.access_token;
   GAUTH.tokenExpiry = Date.now() + (resp.expires_in || 3600) * 1000;
+  // Store in BOTH sessionStorage (fast) and localStorage (persists across browser close)
   sessionStorage.setItem('gauth_token', GAUTH.accessToken);
   sessionStorage.setItem('gauth_expiry', String(GAUTH.tokenExpiry));
+  localStorage.setItem('gauth_token', GAUTH.accessToken);
+  localStorage.setItem('gauth_expiry', String(GAUTH.tokenExpiry));
 
   // Fetch Google profile
   try {
@@ -85,6 +93,7 @@ async function gauthOnToken(resp) {
     const profile = await profileRes.json();
     GAUTH.currentUser = { email: profile.email, name: profile.name, picture: profile.picture };
     sessionStorage.setItem('gauth_user', JSON.stringify(GAUTH.currentUser));
+    localStorage.setItem('gauth_user', JSON.stringify(GAUTH.currentUser));
     await onAuthReady();
   } catch (e) {
     showLoginError('Failed to get profile: ' + e.message);
@@ -119,6 +128,10 @@ function gauthSignOut() {
   GAUTH.accessToken = null;
   GAUTH.currentUser = null;
   sessionStorage.clear();
+  // Clear persisted Google token
+  localStorage.removeItem('gauth_token');
+  localStorage.removeItem('gauth_expiry');
+  localStorage.removeItem('gauth_user');
   showLoginScreen();
 }
 

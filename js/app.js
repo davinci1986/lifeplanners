@@ -160,12 +160,10 @@ window.addEventListener('DOMContentLoaded', () => {
   // Show login screen first
   showLoginScreen();
 
-  // Try local auth session first
-  const hasLocalSession = localAuthInit();
-  if (!hasLocalSession) {
-    // Fall back to Google auth
-    gauthInit();
-  }
+  // Always init Google auth (to restore saved token for auto-sync)
+  gauthInit();
+  // Try local auth session
+  localAuthInit();
 
   // Check reminders after 2 seconds (post-auth)
   setTimeout(checkRemindersOnLoad, 2000);
@@ -242,6 +240,15 @@ function onLocalAuthReady() {
   updateBadges();
   if (typeof updateSoundBtn === 'function') updateSoundBtn();
   setTimeout(checkRemindersOnLoad, 1500);
+  // Auto-sync with Google Sheets (no button press needed)
+  // Wait for Google token to restore, then pull latest + start push sync
+  setTimeout(() => {
+    if (typeof GAUTH !== 'undefined' && GAUTH.accessToken) {
+      showToast('☁️ Auto-syncing...', 'info');
+      if (typeof pullTeamDataFromSheets === 'function') pullTeamDataFromSheets();
+      if (typeof startSheetsSync === 'function') startSheetsSync();
+    }
+  }, 2000);
 }
 
 function switchLoginTab(tab) {

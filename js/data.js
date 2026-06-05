@@ -30,6 +30,8 @@ function saveDB() {
     localStorage.setItem(DB_KEY, JSON.stringify(DB));
     // Trigger Drive auto-save (debounced)
     if (typeof gdScheduleSave === 'function') gdScheduleSave();
+    // Trigger Sheets auto-sync on every save — only if Google token is active
+    if (typeof syncLocalToSheets === 'function' && typeof GAUTH !== 'undefined' && GAUTH.accessToken) syncLocalToSheets();
   } catch (e) { console.warn('DB save error', e); }
 }
 
