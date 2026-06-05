@@ -82,7 +82,7 @@ function openSalesCase(id) {
   const contact = getContact(c.contactId);
   document.getElementById('modalTitle').textContent = c.contactName || 'Sales Case';
   document.getElementById('modalSubtitle').textContent = `Sales • ${c.subLabel || ''} • Created ${formatDate(c.createdAt)}`;
-  document.getElementById('modalBody').innerHTML = renderCaseDetail(c, contact);
+  document.getElementById('modalBody').innerHTML = renderCaseDetail({...c, category:'sales'}, contact);
   openModal('caseModal');
 }
 

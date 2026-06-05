@@ -67,6 +67,6 @@ function openClaimsCase(id) {
   const contact = getContact(c.contactId);
   document.getElementById('modalTitle').textContent = c.contactName || 'Claims Case';
   document.getElementById('modalSubtitle').textContent = `Claims • ${c.label || ''} • ${formatDate(c.createdAt)}`;
-  document.getElementById('modalBody').innerHTML = renderCaseDetail(c, contact);
+  document.getElementById('modalBody').innerHTML = renderCaseDetail({...c, category:'claims'}, contact);
   openModal('caseModal');
 }

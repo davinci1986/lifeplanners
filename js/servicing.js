@@ -57,6 +57,6 @@ function openServicingCase(id) {
   const contact = getContact(c.contactId);
   document.getElementById('modalTitle').textContent = c.contactName || 'Servicing Case';
   document.getElementById('modalSubtitle').textContent = `Servicing • ${c.label || ''} • ${formatDate(c.createdAt)}`;
-  document.getElementById('modalBody').innerHTML = renderCaseDetail(c, contact);
+  document.getElementById('modalBody').innerHTML = renderCaseDetail({...c, category:'servicing'}, contact);
   openModal('caseModal');
 }
