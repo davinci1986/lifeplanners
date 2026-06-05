@@ -103,11 +103,21 @@ async function gauthOnToken(resp) {
 async function onAuthReady() {
   showLoginLoading('Setting up your workspace...');
 
-  // Ensure spreadsheet exists
-  await sheetsEnsureSpreadsheet();
+  // Ensure spreadsheet exists — may fail if Sheets API not yet enabled; that's OK
+  try {
+    await sheetsEnsureSpreadsheet();
+  } catch (e) {
+    console.warn('Sheets setup skipped (API may not be enabled):', e);
+    showToast('⚠ Google Sheets sync unavailable. Enable the Sheets API in Cloud Console to sync.', 'warning');
+  }
 
   // Load user role from Users sheet
-  await loadCurrentUserRole();
+  try {
+    await loadCurrentUserRole();
+  } catch (e) {
+    console.warn('Could not load user role — defaulting to agent:', e);
+    if (GAUTH.currentUser) GAUTH.currentUser.role = 'agent';
+  }
 
   // Hide login, show app
   hideLoginScreen();
@@ -115,9 +125,10 @@ async function onAuthReady() {
   renderCurrentPage();
   updateBadges();
   updateAuthUI();
+  if (typeof startAutoLogout === 'function') startAutoLogout();
 
-  // Start auto-sync
-  startSheetsSync();
+  // Start auto-sync (silently fails if API not available)
+  try { startSheetsSync(); } catch (e) {}
 }
 
 /* ---------- SIGN OUT ---------- */
@@ -128,10 +139,10 @@ function gauthSignOut() {
   GAUTH.accessToken = null;
   GAUTH.currentUser = null;
   sessionStorage.clear();
-  // Clear persisted Google token
   localStorage.removeItem('gauth_token');
   localStorage.removeItem('gauth_expiry');
   localStorage.removeItem('gauth_user');
+  if (typeof stopAutoLogout === 'function') stopAutoLogout();
   showLoginScreen();
 }
 
@@ -227,15 +238,16 @@ function updateAuthUI() {
 function getRoleLabel(role) {
   const map = {
     admin: '👑 Admin',
-    district_manager: '🏆 District Manager',
-    unit_manager: '⭐ Unit Manager',
+    dm: '🏆 District Manager', district_manager: '🏆 District Manager',
+    um: '⭐ Unit Manager',     unit_manager: '⭐ Unit Manager',
     agent: '👤 Agent'
   };
   return map[role] || '👤 Agent';
 }
 
 function getRoleBadgeColor(role) {
-  return { admin:'#FF2D55', district_manager:'#AF52DE', unit_manager:'#007AFF', agent:'#34C759' }[role] || '#6B6B6E';
+  const map = { admin:'#FF2D55', dm:'#AF52DE', district_manager:'#AF52DE', um:'#007AFF', unit_manager:'#007AFF', agent:'#34C759' };
+  return map[role] || '#6B6B6E';
 }
 
 /* ---------- LOGIN SCREEN ---------- */

@@ -201,21 +201,102 @@ function getLocalUsers() {
 }
 function saveLocalUsers(users) { localStorage.setItem('lp_users', JSON.stringify(users)); }
 
-function localLogin() {
+/* ---- Password Hashing (SHA-256, SubtleCrypto — browser built-in, no library) ---- */
+async function hashPassword(pwd) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pwd));
+  return 'sha256:' + Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+async function verifyPassword(input, stored) {
+  if (!stored) return false;
+  if (stored.startsWith('sha256:')) return (await hashPassword(input)) === stored;
+  return input === stored; // legacy plaintext fallback
+}
+
+/* ---- Brute-Force Lockout ---- */
+const _LO_KEY = 'lp_lockout';
+function _getLockout() { try { return JSON.parse(localStorage.getItem(_LO_KEY)||'{}'); } catch { return {}; } }
+function _isLockedOut() {
+  const lo = _getLockout();
+  if (!lo.until) return null;
+  if (Date.now() < lo.until) return lo;
+  localStorage.removeItem(_LO_KEY);
+  return null;
+}
+function _recordFail(username) {
+  const lo = _getLockout();
+  const count = (lo.count||0) + 1;
+  const until = count >= 5 ? Date.now() + 15*60*1000 : null;
+  localStorage.setItem(_LO_KEY, JSON.stringify({ count, username, until }));
+  return count;
+}
+function _clearLockout() { localStorage.removeItem(_LO_KEY); }
+
+/* ---- Auto-Logout on Inactivity (30 min) ---- */
+let _inactivityTimer = null;
+const INACTIVITY_MS = 30 * 60 * 1000;
+function _resetInactivity() {
+  clearTimeout(_inactivityTimer);
+  _inactivityTimer = setTimeout(() => {
+    if (LOCAL_AUTH.currentUser) {
+      showToast('Session expired due to inactivity.', 'info');
+      localLogout();
+    }
+  }, INACTIVITY_MS);
+}
+function startAutoLogout() {
+  ['mousemove','keydown','click','touchstart'].forEach(e => document.addEventListener(e, _resetInactivity, { passive:true }));
+  _resetInactivity();
+}
+function stopAutoLogout() {
+  clearTimeout(_inactivityTimer);
+  ['mousemove','keydown','click','touchstart'].forEach(e => document.removeEventListener(e, _resetInactivity));
+}
+
+/* ---- Login / Logout ---- */
+async function localLogin() {
   const username = document.getElementById('loginUsername')?.value?.trim();
   const password = document.getElementById('loginPassword')?.value;
   if (!username || !password) { showLoginError('Please enter username and password'); return; }
+
+  // Check lockout
+  const lo = _isLockedOut();
+  if (lo) {
+    const mins = Math.ceil((lo.until - Date.now()) / 60000);
+    showLoginError(`Too many failed attempts. Try again in ${mins} minute${mins>1?'s':''}.`);
+    return;
+  }
+
   const users = getLocalUsers();
-  const user = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.password === password);
-  if (!user) { showLoginError('Invalid username or password'); return; }
+  const user  = users.find(u => u.username.toLowerCase() === username.toLowerCase());
+  if (!user || !(await verifyPassword(password, user.password))) {
+    const count = _recordFail(username);
+    const left  = Math.max(0, 5 - count);
+    showLoginError(left > 0
+      ? `Invalid username or password. ${left} attempt${left!==1?'s':''} remaining.`
+      : 'Account locked for 15 minutes due to too many failed attempts.');
+    return;
+  }
+
+  _clearLockout();
+
+  // Silently upgrade plaintext password to hash
+  if (!user.password.startsWith('sha256:')) {
+    const hashed = await hashPassword(password);
+    const all = getLocalUsers();
+    const idx = all.findIndex(u => u.id === user.id);
+    if (idx >= 0) { all[idx].password = hashed; saveLocalUsers(all); user.password = hashed; }
+  }
+
   LOCAL_AUTH.currentUser = user;
   sessionStorage.setItem('lp_session', JSON.stringify(user));
+  startAutoLogout();
   onLocalAuthReady();
 }
 
 function localLogout() {
   LOCAL_AUTH.currentUser = null;
   sessionStorage.removeItem('lp_session');
+  stopAutoLogout();
   showLoginScreen();
 }
 
@@ -408,7 +489,7 @@ function renderUserForm(u = null) {
     </div>`;
 }
 
-function saveUser(existingId = '') {
+async function saveUser(existingId = '') {
   const name     = document.getElementById('uf_name')?.value?.trim();
   const username = document.getElementById('uf_username')?.value?.trim();
   const password = document.getElementById('uf_password')?.value;
@@ -419,12 +500,14 @@ function saveUser(existingId = '') {
   if (existingId) {
     const idx = users.findIndex(u => u.id === existingId);
     if (idx < 0) return;
-    users[idx] = { ...users[idx], name, username, role, email, ...(password ? { password } : {}) };
+    const pwUpdate = password ? { password: await hashPassword(password) } : {};
+    users[idx] = { ...users[idx], name, username, role, email, ...pwUpdate };
   } else {
     if (!password) { showToast('Password is required', 'error'); return; }
     const dup = users.find(u => u.username.toLowerCase() === username.toLowerCase());
     if (dup) { showToast('Username already exists', 'error'); return; }
-    users.push({ id: 'u' + Date.now(), username, password, name, role, email, createdAt: new Date().toISOString() });
+    const hashed = await hashPassword(password);
+    users.push({ id: 'u' + Date.now(), username, password: hashed, name, role, email, createdAt: new Date().toISOString() });
   }
   saveLocalUsers(users);
   showToast('User saved!', 'success');
