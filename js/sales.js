@@ -127,7 +127,7 @@ function renderNewCaseForm(category, existingCase = null) {
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px" id="labelChips">
         ${labelDefs.map(l => `
           <label class="checkbox-wrap" style="background:var(--bg);border:1.5px solid var(--border);border-radius:8px;padding:5px 10px;cursor:pointer;font-size:12px">
-            <input type="radio" name="nf_label" value="${l.id}" ${existingCase?.label===l.id?'checked':''}> ${l.id} — ${l.label}
+            <input type="radio" name="nf_label" value="${l.id}" ${existingCase?.label===l.id?'checked':''}> ${l.label}
           </label>`).join('')}
       </div>
       <div style="display:flex;gap:6px;margin-top:4px">

@@ -52,7 +52,7 @@ function openSnapwillCase(id) {
   document.getElementById('modalTitle').textContent = c.contactName || 'Snapwill Case';
   document.getElementById('modalSubtitle').textContent = `Snapwill • ${formatDate(c.createdAt)}`;
 
-  let body = renderCaseDetail(c, contact);
+  let body = renderCaseDetail({...c, category:'snapwill'}, contact);
 
   // Customer types section (always shown for snapwill)
   const allTypes = getSnapwillTypes();
