@@ -152,6 +152,203 @@ function renderCategoryCard(cat) {
     </div>`;
 }
 
+/* ============================================
+   Team Dashboard
+   ============================================ */
+
+function renderTeamDashboard() {
+  document.getElementById('pageTitle').textContent = 'Team Dashboard';
+  const content = document.getElementById('content');
+
+  const users    = getLocalUsers();
+  const allCases = getCases();
+  const allCont  = getContacts();
+  const allDue   = getDueReminders();
+
+  // Role hierarchy for display
+  const roleOrder = ['admin', 'dm', 'um', 'agent'];
+  const roleLabel = { admin: 'Admin', dm: 'District Manager', um: 'Unit Manager', agent: 'Agent' };
+  const roleColor = { admin: 'var(--red)', dm: 'var(--purple)', um: 'var(--blue)', agent: 'var(--green)' };
+
+  // Helper: stats for a specific user email
+  function agentStats(email) {
+    const cases    = allCases.filter(c => c.ownerEmail === email);
+    const contacts = allCont.filter(c => c.ownerEmail === email);
+    const due      = allDue.filter(r => r.ownerEmail === email);
+    const cats = ['sales','claims','servicing','recruitment','onboarding'];
+    const active    = cases.filter(c => !c.kiv && c.currentStatus < 99).length;
+    const completed = cases.filter(c => {
+      const def = getStatusDef(c.category);
+      return c.currentStatus === (def ? def.length : 8);
+    }).length;
+    const kiv = cases.filter(c => c.kiv).length;
+    const catBreakdown = cats.map(cat => {
+      const cc = cases.filter(c => c.category === cat);
+      return { cat, count: cc.length };
+    });
+    return { cases, contacts, due, active, completed, kiv, catBreakdown, total: cases.length };
+  }
+
+  // Pipeline chart data (all agents combined, sales funnel)
+  const salesDef = getStatusDef('sales');
+  const salesCases = allCases.filter(c => c.category === 'sales' && !c.kiv);
+  const pipelineData = salesDef ? salesDef.map((step, i) => ({
+    label: step.label,
+    count: salesCases.filter(c => c.completedSteps && c.completedSteps.includes(step.n)).length
+  })) : [];
+  const maxPipeline = Math.max(...pipelineData.map(d => d.count), 1);
+
+  // Category distribution bar chart (all users)
+  const catMetas = ['sales','claims','servicing','recruitment','onboarding'].map(cat => {
+    const m = catMeta(cat);
+    const count = allCases.filter(c => c.category === cat).length;
+    return { cat, label: m.label, icon: m.icon, color: m.color, count };
+  });
+  const maxCat = Math.max(...catMetas.map(d => d.count), 1);
+
+  // Conversion rate
+  const totalSales = allCases.filter(c => c.category === 'sales').length;
+  const closedSales = allCases.filter(c => {
+    if (c.category !== 'sales') return false;
+    const def = getStatusDef('sales');
+    return def && c.completedSteps && c.completedSteps.includes(def.find(s => s.label.toLowerCase().includes('clos'))?.n);
+  }).length;
+  const convRate = totalSales > 0 ? Math.round((closedSales / totalSales) * 100) : 0;
+
+  content.innerHTML = `
+    <!-- Team Summary Stats -->
+    <div class="stats-grid mb-24">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#EDE7F6">👥</div>
+        <div class="stat-num" style="color:var(--purple)">${users.length}</div>
+        <div class="stat-label">Team Members</div>
+        <div class="stat-sub">${users.filter(u => u.role === 'agent').length} agents</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#FFF3E0">📁</div>
+        <div class="stat-num" style="color:var(--orange)">${allCases.filter(c=>!c.kiv).length}</div>
+        <div class="stat-label">Active Cases</div>
+        <div class="stat-sub">Team-wide</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:var(--green-light)">🏆</div>
+        <div class="stat-num" style="color:var(--green)">${allCases.filter(c=>{const d=getStatusDef(c.category);return d&&c.currentStatus===(d.length||8);}).length}</div>
+        <div class="stat-label">Completed</div>
+        <div class="stat-sub">All categories</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#E8F0FE">📞</div>
+        <div class="stat-num" style="color:var(--blue)">${allCont.length}</div>
+        <div class="stat-label">Total Contacts</div>
+        <div class="stat-sub">Team CRM</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:${allDue.length>0?'var(--red-light)':'var(--green-light)'}">⚠️</div>
+        <div class="stat-num" style="color:${allDue.length>0?'var(--red)':'var(--green)'}">${allDue.length}</div>
+        <div class="stat-label">Due Reminders</div>
+        <div class="stat-sub">Team-wide</div>
+      </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="grid-2 mb-24">
+      <!-- Pipeline Chart -->
+      <div class="card">
+        <div class="card-body">
+          <div class="section-title mb-16">📊 Sales Pipeline</div>
+          ${pipelineData.length === 0
+            ? `<div class="empty-state" style="padding:30px 0"><div class="empty-state-icon">📊</div><div class="empty-state-title">No sales cases yet</div></div>`
+            : `<div class="team-chart-bars">
+                ${pipelineData.map(d => `
+                  <div class="team-chart-row">
+                    <div class="team-chart-label">${escHtml(d.label)}</div>
+                    <div class="team-chart-bar-wrap">
+                      <div class="team-chart-bar" style="width:${Math.round((d.count/maxPipeline)*100)}%;background:var(--blue)"></div>
+                    </div>
+                    <div class="team-chart-val">${d.count}</div>
+                  </div>`).join('')}
+              </div>`
+          }
+        </div>
+      </div>
+
+      <!-- Category Distribution -->
+      <div class="card">
+        <div class="card-body">
+          <div class="section-title mb-16">📂 Cases by Category</div>
+          <div class="team-chart-bars">
+            ${catMetas.map(d => `
+              <div class="team-chart-row">
+                <div class="team-chart-label">${d.icon} ${d.label}</div>
+                <div class="team-chart-bar-wrap">
+                  <div class="team-chart-bar" style="width:${Math.round((d.count/maxCat)*100)}%;background:${d.color}"></div>
+                </div>
+                <div class="team-chart-val">${d.count}</div>
+              </div>`).join('')}
+          </div>
+          <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);display:flex;gap:24px">
+            <div>
+              <div style="font-size:11px;color:var(--text-secondary)">Sales Conversion</div>
+              <div style="font-size:22px;font-weight:700;color:${convRate>=50?'var(--green)':'var(--orange)'}">
+                ${convRate}%
+              </div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--text-secondary)">Closed / Total Sales</div>
+              <div style="font-size:22px;font-weight:700;color:var(--blue)">${closedSales} / ${totalSales}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hierarchy Tree + Per-Agent Stats -->
+    <div class="section-header mb-16">
+      <div class="section-title">🏢 Team Hierarchy</div>
+    </div>
+    ${roleOrder.map(role => {
+      const roleUsers = users.filter(u => u.role === role);
+      if (roleUsers.length === 0) return '';
+      return `
+        <div class="team-role-group mb-24">
+          <div class="team-role-header" style="border-left:4px solid ${roleColor[role]}">
+            <span style="color:${roleColor[role]};font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:1px">${roleLabel[role]}</span>
+            <span class="text-muted text-sm">${roleUsers.length} member${roleUsers.length>1?'s':''}</span>
+          </div>
+          <div class="team-agent-grid">
+            ${roleUsers.map(u => {
+              const s = agentStats(u.email || '');
+              const initials = (u.name || u.username).split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+              return `
+                <div class="team-agent-card">
+                  <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+                    <div class="team-avatar" style="background:${roleColor[role]}">${escHtml(initials)}</div>
+                    <div>
+                      <div style="font-weight:700;font-size:14px">${escHtml(u.name || u.username)}</div>
+                      <div style="font-size:11px;color:var(--text-secondary)">${escHtml(u.email || '—')}</div>
+                    </div>
+                    ${s.due.length > 0 ? `<span style="margin-left:auto;background:var(--red);color:#fff;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:700">⚠ ${s.due.length} due</span>` : ''}
+                  </div>
+                  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:14px">
+                    <div class="team-mini-stat"><div style="font-size:18px;font-weight:700;color:var(--orange)">${s.active}</div><div style="font-size:10px;color:var(--text-secondary)">Active</div></div>
+                    <div class="team-mini-stat"><div style="font-size:18px;font-weight:700;color:var(--green)">${s.completed}</div><div style="font-size:10px;color:var(--text-secondary)">Done</div></div>
+                    <div class="team-mini-stat"><div style="font-size:18px;font-weight:700;color:#B8860B">${s.kiv}</div><div style="font-size:10px;color:var(--text-secondary)">KIV</div></div>
+                    <div class="team-mini-stat"><div style="font-size:18px;font-weight:700;color:var(--blue)">${s.contacts.length}</div><div style="font-size:10px;color:var(--text-secondary)">Contacts</div></div>
+                  </div>
+                  <div style="display:flex;flex-wrap:wrap;gap:4px">
+                    ${s.catBreakdown.filter(cb=>cb.count>0).map(cb => {
+                      const m = catMeta(cb.cat);
+                      return `<span style="background:${m.bg||'#eee'};color:${m.color||'#333'};border-radius:10px;padding:2px 8px;font-size:11px">${m.icon} ${m.label} ${cb.count}</span>`;
+                    }).join('') || '<span style="font-size:12px;color:var(--text-secondary)">No cases yet</span>'}
+                  </div>
+                </div>`;
+            }).join('')}
+          </div>
+        </div>`;
+    }).join('')}
+  `;
+}
+
 function renderReminderItem(r) {
   const days = daysUntil(r.date);
   let cls = 'upcoming', dotCls = 'upcoming';
