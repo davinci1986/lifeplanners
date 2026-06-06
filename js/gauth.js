@@ -4,7 +4,7 @@
    ============================================ */
 
 const GAUTH = {
-  CLIENT_ID: localStorage.getItem('gd_client_id') || '',
+  CLIENT_ID: localStorage.getItem('gd_client_id') || '638079686621-5jbk5gh84hiu9te96dedb7uhvvmuvtao.apps.googleusercontent.com',
   SCOPES: [
     'https://www.googleapis.com/auth/spreadsheets',
     'https://www.googleapis.com/auth/drive.file',
@@ -21,7 +21,7 @@ const GAUTH = {
 
 /* ---------- INIT ---------- */
 function gauthInit() {
-  GAUTH.CLIENT_ID = localStorage.getItem('gd_client_id') || '';
+  GAUTH.CLIENT_ID = localStorage.getItem('gd_client_id') || '638079686621-5jbk5gh84hiu9te96dedb7uhvvmuvtao.apps.googleusercontent.com';
   if (!GAUTH.CLIENT_ID) return;
 
   const script = document.getElementById('gsi-script');
