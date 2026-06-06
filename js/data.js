@@ -206,6 +206,7 @@ function createCase(data) {
     closedDate: data.closedDate || null,
     customFields: data.customFields || {},
     completedSteps: data.completedSteps || [],
+    categoryCompletedSteps: data.categoryCompletedSteps || {}, // { snapwill: [1,2], claims: [1] }
     aiSteps: data.aiSteps || [],
     snapwillTypes: data.snapwillTypes || [],
     nextStep: data.nextStep || '',
@@ -615,17 +616,30 @@ function addCRMOption(field, value) {
 }
 
 /* ---------- TO-DO STEP TOGGLE ---------- */
-function toggleStepDone(caseId, stepN, remark, date) {
+function toggleStepDone(caseId, stepN, remark, date, viewCat) {
   const c = getCase(caseId);
   if (!c) return null;
-  const steps = [...(c.completedSteps || [])];
-  const idx = steps.indexOf(stepN);
-  const histEntry = idx >= 0
-    ? { fromStatus: stepN, toStatus: 0, remark: 'Step unchecked', date: new Date().toISOString() }
-    : { fromStatus: c.currentStatus || 0, toStatus: stepN, remark: remark || '', date: date ? new Date(date).toISOString() : new Date().toISOString() };
-  if (idx >= 0) steps.splice(idx, 1); else steps.push(stepN);
-  const maxStep = steps.length > 0 ? Math.max(...steps) : 0;
-  return updateCase(caseId, { completedSteps: steps, currentStatus: maxStep, statusHistory: [...(c.statusHistory || []), histEntry] });
+  const isPrimary = !viewCat || c.category === viewCat;
+
+  if (isPrimary) {
+    // Original logic — updates primary completedSteps
+    const steps = [...(c.completedSteps || [])];
+    const idx = steps.indexOf(stepN);
+    const histEntry = idx >= 0
+      ? { fromStatus: stepN, toStatus: 0, remark: 'Step unchecked', date: new Date().toISOString() }
+      : { fromStatus: c.currentStatus || 0, toStatus: stepN, remark: remark || '', date: date ? new Date(date).toISOString() : new Date().toISOString() };
+    if (idx >= 0) steps.splice(idx, 1); else steps.push(stepN);
+    const maxStep = steps.length > 0 ? Math.max(...steps) : 0;
+    return updateCase(caseId, { completedSteps: steps, currentStatus: maxStep, statusHistory: [...(c.statusHistory || []), histEntry] });
+  } else {
+    // Secondary category — updates categoryCompletedSteps[viewCat]
+    const catSteps = { ...(c.categoryCompletedSteps || {}) };
+    const steps = [...(catSteps[viewCat] || [])];
+    const idx = steps.indexOf(stepN);
+    if (idx >= 0) steps.splice(idx, 1); else steps.push(stepN);
+    catSteps[viewCat] = steps;
+    return updateCase(caseId, { categoryCompletedSteps: catSteps });
+  }
 }
 
 /* ---------- SNAPWILL CUSTOMER TYPES ---------- */

@@ -114,10 +114,14 @@ function renderNewCaseForm(category, existingCase = null) {
 
     ${category === 'sales' ? `
     <div class="form-group">
-      <label class="form-label">Company</label>
-      <div style="display:flex;gap:8px">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="sublabel" value="AIA" ${(!existingCase||existingCase.subLabel==='AIA')?'checked':''} onchange="playClick()"> AIA</label>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="sublabel" value="Snapwill" ${existingCase?.subLabel==='Snapwill'?'checked':''} onchange="playClick()"> Snapwill</label>
+      <label class="form-label">Company (select all that apply)</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${['AIA','Snapwill'].map(co => {
+          const existingCos = existingCase?.companies || (existingCase?.subLabel ? existingCase.subLabel.split(',').map(s=>s.trim()) : ['AIA']);
+          return `<label class="checkbox-wrap" style="background:var(--bg);border:1.5px solid var(--border);border-radius:8px;padding:6px 12px;cursor:pointer">
+            <input type="checkbox" name="company" value="${co}" ${existingCos.includes(co)?'checked':''} onchange="playClick()"> ${co}
+          </label>`;
+        }).join('')}
       </div>
     </div>` : ''}
 
@@ -171,7 +175,7 @@ function addLabelToCategory(category) {
       const lbl = document.createElement('label');
       lbl.className = 'checkbox-wrap';
       lbl.style.cssText = 'background:var(--bg);border:1.5px solid var(--border);border-radius:8px;padding:5px 10px;cursor:pointer;font-size:12px';
-      lbl.innerHTML = `<input type="radio" name="nf_label" value="${entry.id}"> ${escHtml(entry.id)} — ${escHtml(entry.label)}`;
+      lbl.innerHTML = `<input type="radio" name="nf_label" value="${entry.id}"> ${escHtml(entry.label)}`;
       chips.appendChild(lbl);
       existing = lbl.querySelector('input');
     }
@@ -212,7 +216,14 @@ function saveNewCase(category, existingId = '') {
   const selectedCats = catCheckboxes.length > 0 ? [...catCheckboxes].map(cb => cb.value) : [category];
   const primaryCat = selectedCats.includes(category) ? category : (selectedCats[0] || category);
 
-  const subLabelEl = document.querySelector('input[name="sublabel"]:checked');
+  // Company checkboxes (AIA / Snapwill — multi-select)
+  const companyChecks = [...document.querySelectorAll('input[name="company"]:checked')].map(cb => cb.value);
+  const companies = companyChecks.length > 0 ? companyChecks : [];
+  const subLabelVal = companies.join(', '); // backward-compat display
+  // Auto-add snapwill category when Snapwill company is selected
+  if (companies.includes('Snapwill') && !selectedCats.includes('snapwill')) {
+    selectedCats.push('snapwill');
+  }
   // Label: radio selection OR custom text input
   const labelRadio = document.querySelector('input[name="nf_label"]:checked');
   const labelCustom = document.getElementById('nf_custom_label')?.value?.trim();
@@ -240,7 +251,8 @@ function saveNewCase(category, existingId = '') {
       contactId: contact.id,
       category: primaryCat,
       categories: selectedCats,
-      subLabel: subLabelEl?.value || '',
+      companies,
+      subLabel: subLabelVal,
       label,
       remarks,
       priority
@@ -253,7 +265,8 @@ function saveNewCase(category, existingId = '') {
       contactName: contact.name,
       category: primaryCat,
       categories: selectedCats,
-      subLabel: subLabelEl?.value || '',
+      companies,
+      subLabel: subLabelVal,
       label,
       remarks,
       priority,
@@ -312,7 +325,7 @@ function renderCaseDetail(c, contact) {
             const customLabel = c.customStatusLabels?.[s.n] || s.label;
             return renderStatusStep(c, s, {
               isDone, isCurrent, histEntry: hist,
-              onClickFn: `handleStepClick('${c.id}',${s.n},'${escHtml(customLabel)}')`
+              onClickFn: `handleStepClick('${c.id}',${s.n},'${escHtml(customLabel)}','${c._viewCat||c.category}')`
             });
           }).join('');
         })()}

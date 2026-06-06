@@ -56,7 +56,7 @@ function openServicingCase(id) {
   playClick();
   const contact = getContact(c.contactId);
   document.getElementById('modalTitle').textContent = c.contactName || 'Servicing Case';
-  document.getElementById('modalSubtitle').textContent = `Servicing • ${c.label || ''} • ${formatDate(c.createdAt)}`;
-  document.getElementById('modalBody').innerHTML = renderCaseDetail({...c, category:'servicing'}, contact);
+  document.getElementById('modalSubtitle').textContent = `Servicing • ${getLabelName('servicing', c.label)} • ${formatDate(c.createdAt)}`;
+  document.getElementById('modalBody').innerHTML = renderCaseDetail(buildViewCase(c, 'servicing'), contact);
   openModal('caseModal');
 }

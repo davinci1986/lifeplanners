@@ -101,7 +101,7 @@ function renderKIVList(cases) {
       ${avatarHTML(c.contactName, 36)}
       <div style="flex:1">
         <div class="fw-600">${escHtml(c.contactName)}</div>
-        <div class="text-xs text-muted">${catMeta(c.category).icon} ${catMeta(c.category).label} ${c.label ? `• ${c.label}` : ''}</div>
+        <div class="text-xs text-muted">${catMeta(c.category).icon} ${catMeta(c.category).label} ${c.label ? `• ${getLabelName(c.category, c.label)}` : ''}</div>
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
         <span class="status-badge kiv">KIV</span>

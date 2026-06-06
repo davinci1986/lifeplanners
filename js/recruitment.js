@@ -110,7 +110,7 @@ function renderRecruitDetail(c, contact) {
             ? `<div class="step-remark" style="padding:4px 0 0 44px">Reason: ${escHtml(c.customFields.kivReason)}</div>` : '';
           return renderStatusStep(c, s, {
             isDone, isCurrent, histEntry: hist,
-            onClickFn: `handleStepClick('${c.id}',${s.n},'${escHtml(customLabel)}')`,
+            onClickFn: `handleStepClick('${c.id}',${s.n},'${escHtml(customLabel)}','${c._viewCat||c.category}')`,
             extraContent
           });
         }).join('')}

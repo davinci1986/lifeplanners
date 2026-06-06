@@ -182,6 +182,21 @@ function statusClass(category, status) {
   return `s${Math.min(status, 9)}`;
 }
 
+/* ---------- LABEL DISPLAY HELPER ---------- */
+function getLabelName(category, labelId) {
+  if (!labelId) return '';
+  // Check built-in LABEL_DEFS
+  const defs = typeof getLabelDefs === 'function' ? getLabelDefs(category) : [];
+  const found = defs.find(l => l.id === labelId);
+  if (found) return found.label;
+  // Check custom labels
+  const custom = DB.customLabels?.[category] || [];
+  const customFound = custom.find(l => l.id === labelId);
+  if (customFound) return customFound.label;
+  // Fallback: show as-is (custom text label)
+  return labelId;
+}
+
 /* ---------- RENDER CASE ROW ---------- */
 function renderCaseRow(c, onClick) {
   const statusLabel = getStatusLabel(c.category, c.currentStatus, c);
@@ -196,7 +211,7 @@ function renderCaseRow(c, onClick) {
       <div class="case-info">
         <div class="case-name">${escHtml(c.contactName || 'Unknown')}</div>
         <div class="case-meta">
-          ${c.label ? `<span class="label-badge">${escHtml(c.label)}</span>` : ''}
+          ${c.label ? `<span class="label-badge">${escHtml(getLabelName(c.category, c.label))}</span>` : ''}
           ${c.subLabel ? `<span class="label-badge">${escHtml(c.subLabel)}</span>` : ''}
           <span class="status-badge ${sc}">${escHtml(statusLabel)}</span>
           ${extraCats.map(cat => `<span class="label-badge" style="background:${catMeta(cat).bg};color:${catMeta(cat).color}">${catMeta(cat).icon} ${catMeta(cat).label}</span>`).join('')}
@@ -505,7 +520,7 @@ function resetStepLabel(caseId, stepN) {
 }
 
 /* ---------- SET STATUS WITH DATE PICKER ---------- */
-function openSetStatusWithDate(caseId, stepN, stepLabel) {
+function openSetStatusWithDate(caseId, stepN, stepLabel, viewCat) {
   playClick();
   document.getElementById('contactModalTitle').textContent = `Set: ${stepLabel}`;
   document.getElementById('contactModalBody').innerHTML = `
@@ -519,20 +534,20 @@ function openSetStatusWithDate(caseId, stepN, stepLabel) {
     </div>
     <div class="btn-row">
       <button class="btn btn-secondary" onclick="closeContactModalBtn()">Cancel</button>
-      <button class="btn btn-primary" onclick="confirmSetStatusWithDate('${caseId}',${stepN})">✓ Confirm</button>
+      <button class="btn btn-primary" onclick="confirmSetStatusWithDate('${caseId}',${stepN},'${viewCat||''}')">✓ Confirm</button>
     </div>`;
   openModal('contactModal');
 }
 
-function confirmSetStatusWithDate(caseId, stepN) {
+function confirmSetStatusWithDate(caseId, stepN, viewCat) {
   const date = document.getElementById('ssd_date')?.value;
   const remark = document.getElementById('ssd_remark')?.value || '';
-  const updatedCase = toggleStepDone(caseId, stepN, remark, date);
+  const updatedCase = toggleStepDone(caseId, stepN, remark, date, viewCat || null);
   if (updatedCase) checkStepAutoReminder(updatedCase, stepN);
   showToast('Step done! ✓', 'success');
   playSuccess();
   closeContactModalBtn();
-  setTimeout(() => { openCaseById(caseId); updateBadges(); }, 50);
+  setTimeout(() => { openCaseByIdInView(caseId, viewCat || null); updateBadges(); }, 50);
   renderCurrentPage();
 }
 
@@ -569,21 +584,58 @@ function refreshSidebarCategories() {
   });
 }
 
+/* ---------- BUILD VIEW CASE (multi-category) ---------- */
+function buildViewCase(c, viewCat) {
+  if (!viewCat || c.category === viewCat) return c;
+  return {
+    ...c,
+    category: viewCat,
+    completedSteps: (c.categoryCompletedSteps || {})[viewCat] || [],
+    statusHistory: [], // secondary categories have no separate history yet
+    _viewCat: viewCat
+  };
+}
+
 /* ---------- TO-DO STEP CLICK HANDLER ---------- */
-function handleStepClick(caseId, stepN, label) {
+function handleStepClick(caseId, stepN, label, viewCat) {
   const c = getCase(caseId);
   if (!c) return;
-  if ((c.completedSteps || []).includes(stepN)) {
+  const isPrimary = !viewCat || c.category === viewCat;
+  const steps = isPrimary
+    ? (c.completedSteps || [])
+    : ((c.categoryCompletedSteps || {})[viewCat] || []);
+
+  if (steps.includes(stepN)) {
     // Uncheck immediately
-    toggleStepDone(caseId, stepN, '', null);
+    toggleStepDone(caseId, stepN, '', null, viewCat);
     showToast('Step unchecked', 'info');
     playClick();
-    setTimeout(() => { openCaseById(caseId); updateBadges(); }, 50);
+    closeCaseModalBtn();
+    setTimeout(() => { openCaseByIdInView(caseId, viewCat); updateBadges(); }, 50);
     renderCurrentPage();
   } else {
     // Open date + remark picker
-    openSetStatusWithDate(caseId, stepN, label);
+    openSetStatusWithDate(caseId, stepN, label, viewCat);
   }
+}
+
+/* ---------- OPEN CASE IN SPECIFIC VIEW ---------- */
+function openCaseByIdInView(caseId, viewCat) {
+  const c = getCase(caseId);
+  if (!c) return;
+  if (!viewCat || c.category === viewCat) {
+    openCaseById(caseId);
+    return;
+  }
+  // Open using the view category's handler
+  const handlers = {
+    sales: openSalesCase, claims: openClaimsCase, servicing: openServicingCase,
+    recruitment: openRecruitCase, onboarding: openOnboardCase,
+    snapwill: openSnapwillCase, others: openOthersCase
+  };
+  const fn = handlers[viewCat];
+  if (fn) fn(caseId);
+  else openCaseById(caseId);
 }
 
 /* ---------- CUSTOM CATEGORY PAGE ---------- */
