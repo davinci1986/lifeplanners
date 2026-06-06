@@ -80,6 +80,8 @@ function renderContactDetail(contact, cases) {
     <div class="info-row"><span class="info-label">NRIC</span><span class="info-value">${escHtml(contact.nric||'—')}</span></div>
     <div class="info-row"><span class="info-label">Date of Birth</span><span class="info-value">${escHtml(contact.dob||'—')}</span></div>
     <div class="info-row"><span class="info-label">Occupation</span><span class="info-value">${escHtml(contact.occupation||'—')}</span></div>
+    <div class="info-row"><span class="info-label">Race</span><span class="info-value">${escHtml(contact.race||'—')}</span></div>
+    <div class="info-row"><span class="info-label">Religion</span><span class="info-value">${escHtml(contact.religion||'—')}</span></div>
     ${contact.notes ? `<div class="info-row"><span class="info-label">Notes</span><span class="info-value">${escHtml(contact.notes)}</span></div>` : ''}
 
     <div class="section-divider">Case History (${cases.length})</div>
@@ -126,11 +128,57 @@ function openEditContact(id) {
   openModal('contactModal');
 }
 
+function guessRaceFromName(name) {
+  const n = name.toLowerCase();
+  const malayKw   = ['ahmad','mohamed','mohammed','siti','nurul','nur ','abdul','farah','hafiz','amirul','izzati','hakim','azri','binti','bin ','anak','mohd','noor','zul','rizal','fadzil','aisyah','hana','aishah'];
+  const indianKw  = ['muthu','kumar','rajan','siva','priya','chandran','suresh','rama','krishnan','nair','pillai','a/l','a/p','d/o','s/o','gopal','selvam','velu','raj ','devi','lakshmi','ganesh','anand','bala'];
+  const chineseSn = ['tan','lim','wong','ng','chan','ong','yap','khor','goh','teo','cheah','chong','loh','low','khoo','heng','sim','chua','poh','lee','liaw','koay','foo','lau','yeoh','tiong','chia','wee','quah'];
+  if (malayKw.some(k => n.includes(k))) return { race: 'Malay', religion: 'Islam' };
+  if (indianKw.some(k => n.includes(k))) return { race: 'Indian', religion: 'Hinduism' };
+  const first = n.split(' ')[0], last = n.split(' ').slice(-1)[0];
+  if (chineseSn.includes(first) || chineseSn.includes(last)) return { race: 'Chinese', religion: 'Buddhism/Taoism' };
+  return { race: '', religion: '' };
+}
+
+function autoSuggestRace(name) {
+  if (!name || name.length < 3) return;
+  const guess = guessRaceFromName(name);
+  if (!guess.race) return;
+  // Only auto-apply if user hasn't manually selected yet
+  const raceInput = document.getElementById('cf_race');
+  const relInput  = document.getElementById('cf_religion');
+  if (raceInput && !raceInput.value) {
+    raceInput.value = guess.race;
+    applyChipActive('race_picker', guess.race);
+  }
+  if (relInput && !relInput.value) {
+    relInput.value = guess.religion;
+    applyChipActive('religion_picker', guess.religion);
+  }
+}
+
+function pickChip(pickerId, btn) {
+  document.querySelectorAll(`#${pickerId} .chip-opt`).forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const hiddenId = pickerId === 'race_picker' ? 'cf_race' : 'cf_religion';
+  const hidden = document.getElementById(hiddenId);
+  if (hidden) hidden.value = btn.dataset.val;
+  playClick();
+}
+
+function applyChipActive(pickerId, val) {
+  document.querySelectorAll(`#${pickerId} .chip-opt`).forEach(b => {
+    b.classList.toggle('active', b.dataset.val === val);
+  });
+}
+
 function renderContactForm(contact = null) {
+  const raceOpts  = ['Chinese','Malay','Indian','Others'];
+  const relOpts   = ['Islam','Buddhism/Taoism','Hinduism','Christianity','Others'];
   return `
     <div class="form-group">
       <label class="form-label">Full Name *</label>
-      <input class="form-control" id="cf_name" value="${escHtml(contact?.name||'')}" placeholder="Full name..." />
+      <input class="form-control" id="cf_name" value="${escHtml(contact?.name||'')}" placeholder="Full name..." oninput="autofillContact(this.value);autoSuggestRace(this.value)" autocomplete="off" />
     </div>
     <div class="form-row">
       <div class="form-group">
@@ -156,6 +204,22 @@ function renderContactForm(contact = null) {
       <label class="form-label">Occupation</label>
       <input class="form-control" id="cf_occ" value="${escHtml(contact?.occupation||'')}" placeholder="Job title..." />
     </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Race</label>
+        <div class="chip-picker" id="race_picker" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
+          ${raceOpts.map(r => `<button type="button" class="chip-opt${contact?.race===r?' active':''}" data-val="${r}" onclick="pickChip('race_picker',this)" style="padding:5px 12px;border-radius:20px;border:1.5px solid var(--border);background:var(--bg);cursor:pointer;font-size:12px">${r}</button>`).join('')}
+        </div>
+        <input type="hidden" id="cf_race" value="${escHtml(contact?.race||'')}" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Religion</label>
+        <div class="chip-picker" id="religion_picker" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
+          ${relOpts.map(r => `<button type="button" class="chip-opt${contact?.religion===r?' active':''}" data-val="${r}" onclick="pickChip('religion_picker',this)" style="padding:5px 12px;border-radius:20px;border:1.5px solid var(--border);background:var(--bg);cursor:pointer;font-size:12px">${r}</button>`).join('')}
+        </div>
+        <input type="hidden" id="cf_religion" value="${escHtml(contact?.religion||'')}" />
+      </div>
+    </div>
     <div class="form-group">
       <label class="form-label">Notes</label>
       <textarea class="form-control" id="cf_notes" rows="2" placeholder="Any notes...">${escHtml(contact?.notes||'')}</textarea>
@@ -178,6 +242,8 @@ function saveContact(existingId = '') {
     nric: document.getElementById('cf_nric')?.value || '',
     dob: document.getElementById('cf_dob')?.value || '',
     occupation: document.getElementById('cf_occ')?.value || '',
+    race: document.getElementById('cf_race')?.value || '',
+    religion: document.getElementById('cf_religion')?.value || '',
     notes: document.getElementById('cf_notes')?.value || ''
   };
 

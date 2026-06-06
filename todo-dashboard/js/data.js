@@ -67,6 +67,8 @@ function createContact(data) {
     nric: data.nric || '',
     dob: data.dob || '',
     occupation: data.occupation || '',
+    race: data.race || '',
+    religion: data.religion || '',
     notes: data.notes || '',
     tags: data.tags || [],
     createdAt: new Date().toISOString(),
@@ -315,6 +317,11 @@ const STATUS_DEFS = {
   ],
   others: []
 };
+
+function getStaleCases(days = 7) {
+  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+  return DB.cases.filter(c => !c.kiv && c.updatedAt < cutoff && c.currentStatus < getStatusDef(c.category).length);
+}
 
 function getStatusDef(category) { return STATUS_DEFS[category] || []; }
 

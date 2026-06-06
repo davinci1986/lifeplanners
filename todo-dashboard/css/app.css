@@ -417,6 +417,11 @@ body {
 .filter-chip:hover { border-color: var(--blue); color: var(--blue); }
 .filter-chip.active { background: var(--blue); border-color: var(--blue); color: #fff; }
 
+/* Chip picker (race/religion selectors) */
+.chip-opt { transition: background .15s, border-color .15s, color .15s; }
+.chip-opt:hover { border-color: var(--blue) !important; color: var(--blue); }
+.chip-opt.active { background: var(--blue) !important; border-color: var(--blue) !important; color: #fff !important; }
+
 /* ======== BUTTONS ======== */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
