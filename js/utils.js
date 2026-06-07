@@ -411,6 +411,8 @@ setInterval(async () => {
     }
     // Telegram push
     await sendTelegramMessage(`⏰ *Reminder Due*\n*${r.title}*\n${r.contactName ? r.contactName : ''}${r.category ? ' • ' + r.category : ''}`);
+    // WhatsApp push (CallMeBot)
+    await sendWhatsAppMessage(`⏰ Reminder Due\n${r.title}\n${r.contactName ? r.contactName : ''}${r.category ? ' • ' + r.category : ''}`);
     newFired.push(r.id);
   }
   if (newFired.length !== fired.length) {
@@ -431,6 +433,17 @@ async function sendTelegramMessage(text) {
       body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' })
     });
   } catch (e) { console.warn('Telegram send failed:', e); }
+}
+
+/* ---------- WHATSAPP HELPER (CallMeBot) ---------- */
+async function sendWhatsAppMessage(text) {
+  const phone = DB.settings?.waPhone;
+  const apiKey = DB.settings?.waApiKey;
+  if (!phone || !apiKey) return;
+  try {
+    const encoded = encodeURIComponent(text);
+    await fetch(`https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encoded}&apikey=${apiKey}`);
+  } catch (e) { console.warn('WhatsApp send failed:', e); }
 }
 
 /* ---------- REMINDER ITEM RENDER ---------- */

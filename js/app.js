@@ -357,14 +357,39 @@ function renderAdminPanel() {
       <div class="section-title">⚙ Admin Panel</div>
     </div>
 
-    <!-- Telegram Bot -->
+    <!-- Notifications -->
     <div class="card mb-24">
-      <div class="card-header"><div class="card-title">🤖 Telegram Notifications</div></div>
+      <div class="card-header"><div class="card-title">🔔 Push Notifications</div></div>
       <div class="card-body">
-        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">
-          Get reminder alerts on Telegram — even when the app is closed. Works on all devices.
-          <br>Setup: Message <strong>@BotFather</strong> on Telegram → <code>/newbot</code> → copy the token below.
-          Then message your new bot once, and use <strong>@userinfobot</strong> to get your Chat ID.
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">
+          Reminders fire on <strong>all three channels at once</strong> — even when the app is closed. Both are free.
+        </p>
+
+        <div class="section-divider" style="margin-top:0">💬 WhatsApp (via CallMeBot — Free)</div>
+        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">
+          Setup: On WhatsApp, add <strong>+34 644 59 78 53</strong> as a contact → send this exact message:<br>
+          <code style="background:var(--bg);padding:2px 6px;border-radius:4px;font-size:11px">I allow callmebot to send me messages</code><br>
+          CallMeBot will reply with your <strong>API Key</strong>. Use your phone number with country code (e.g. <code>60123456789</code>).
+        </p>
+        <div class="form-row mb-8">
+          <div class="form-group mb-0">
+            <label class="form-label">Phone Number (with country code)</label>
+            <input class="form-control" id="wa_phone" value="${escHtml(DB.settings?.waPhone||'')}" placeholder="60123456789" />
+          </div>
+          <div class="form-group mb-0">
+            <label class="form-label">CallMeBot API Key</label>
+            <input class="form-control" id="wa_apikey" value="${escHtml(DB.settings?.waApiKey||'')}" placeholder="Your API key from CallMeBot..." />
+          </div>
+        </div>
+        <div class="btn-row mb-16">
+          <button class="btn btn-secondary btn-sm" onclick="testWhatsApp()">📱 Test WhatsApp</button>
+          <button class="btn btn-primary btn-sm" onclick="saveWhatsAppSettings()">💾 Save</button>
+        </div>
+
+        <div class="section-divider">🤖 Telegram (Free)</div>
+        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">
+          Setup: Message <strong>@BotFather</strong> on Telegram → <code>/newbot</code> → copy Bot Token.
+          Then message your bot once, and send <code>/start</code> to <strong>@userinfobot</strong> to get your Chat ID.
         </p>
         <div class="form-row mb-8">
           <div class="form-group mb-0">
@@ -376,8 +401,8 @@ function renderAdminPanel() {
             <input class="form-control" id="tg_chatid" value="${escHtml(DB.settings?.telegramChatId||'')}" placeholder="Your Telegram user ID..." />
           </div>
         </div>
-        <div class="btn-row mt-8">
-          <button class="btn btn-secondary btn-sm" onclick="testTelegram()">📨 Test Connection</button>
+        <div class="btn-row">
+          <button class="btn btn-secondary btn-sm" onclick="testTelegram()">📨 Test Telegram</button>
           <button class="btn btn-primary btn-sm" onclick="saveTelegramSettings()">💾 Save</button>
         </div>
       </div>
@@ -447,6 +472,34 @@ function renderAdminPanel() {
       </div>
     </div>
   `;
+}
+
+function saveWhatsAppSettings() {
+  const phone = document.getElementById('wa_phone')?.value?.trim();
+  const apiKey = document.getElementById('wa_apikey')?.value?.trim();
+  DB.settings = { ...(DB.settings || {}), waPhone: phone, waApiKey: apiKey };
+  saveDB();
+  showToast('WhatsApp settings saved!', 'success');
+  renderAdminPanel();
+}
+
+async function testWhatsApp() {
+  const phone = document.getElementById('wa_phone')?.value?.trim();
+  const apiKey = document.getElementById('wa_apikey')?.value?.trim();
+  if (!phone || !apiKey) { showToast('Enter Phone and API Key first', 'warning'); return; }
+  try {
+    const text = encodeURIComponent('✅ LifePlanner Pro connected!\nYou will now receive reminder notifications here.');
+    const res = await fetch(`https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${text}&apikey=${apiKey}`);
+    const body = await res.text();
+    if (body.toLowerCase().includes('message queued') || body.toLowerCase().includes('ok') || res.ok) {
+      showToast('✅ WhatsApp message sent! Check your phone.', 'success');
+      playSuccess();
+    } else {
+      showToast('❌ Failed — check phone number and API key', 'error');
+    }
+  } catch (e) {
+    showToast('❌ Error: ' + e.message, 'error');
+  }
 }
 
 function saveTelegramSettings() {
