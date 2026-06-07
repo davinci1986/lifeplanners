@@ -395,11 +395,43 @@ function checkRemindersOnLoad() {
   }
 }
 
-setInterval(() => {
+setInterval(async () => {
   const due = getDueReminders();
+  // Badge update (existing)
   const topBadge = document.getElementById('topReminderBadge');
   if (topBadge) topBadge.classList.toggle('show', due.length > 0);
+  // Notify for newly-due items not yet fired
+  const fired = DB.settings?.notifiedIds || [];
+  const newFired = [...fired];
+  for (const r of due) {
+    if (fired.includes(r.id)) continue;
+    // Browser OS notification
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      new Notification(`⏰ ${r.title}`, { body: r.contactName || '', icon: 'https://davinci1986.github.io/lifeplanners/favicon.ico' });
+    }
+    // Telegram push
+    await sendTelegramMessage(`⏰ *Reminder Due*\n*${r.title}*\n${r.contactName ? r.contactName : ''}${r.category ? ' • ' + r.category : ''}`);
+    newFired.push(r.id);
+  }
+  if (newFired.length !== fired.length) {
+    DB.settings = { ...(DB.settings || {}), notifiedIds: newFired };
+    saveDB();
+  }
 }, 60000);
+
+/* ---------- TELEGRAM HELPER ---------- */
+async function sendTelegramMessage(text) {
+  const token = DB.settings?.telegramToken;
+  const chatId = DB.settings?.telegramChatId;
+  if (!token || !chatId) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' })
+    });
+  } catch (e) { console.warn('Telegram send failed:', e); }
+}
 
 /* ---------- REMINDER ITEM RENDER ---------- */
 function renderReminderItem(r) {

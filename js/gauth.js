@@ -119,6 +119,7 @@ async function onAuthReady() {
     if (GAUTH.currentUser) GAUTH.currentUser.role = 'agent';
   }
 
+  if (typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission();
   // Hide login, show app
   hideLoginScreen();
   if (typeof refreshSidebarCategories === 'function') refreshSidebarCategories();

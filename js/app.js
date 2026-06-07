@@ -321,6 +321,7 @@ function onLocalAuthReady() {
   updateBadges();
   if (typeof updateSoundBtn === 'function') updateSoundBtn();
   setTimeout(checkRemindersOnLoad, 1500);
+  if (typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission();
   // Auto-sync with Google Sheets (no button press needed)
   // Wait for Google token to restore, then pull latest + start push sync
   setTimeout(() => {
@@ -354,6 +355,32 @@ function renderAdminPanel() {
   document.getElementById('content').innerHTML = `
     <div class="section-header mb-16">
       <div class="section-title">⚙ Admin Panel</div>
+    </div>
+
+    <!-- Telegram Bot -->
+    <div class="card mb-24">
+      <div class="card-header"><div class="card-title">🤖 Telegram Notifications</div></div>
+      <div class="card-body">
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">
+          Get reminder alerts on Telegram — even when the app is closed. Works on all devices.
+          <br>Setup: Message <strong>@BotFather</strong> on Telegram → <code>/newbot</code> → copy the token below.
+          Then message your new bot once, and use <strong>@userinfobot</strong> to get your Chat ID.
+        </p>
+        <div class="form-row mb-8">
+          <div class="form-group mb-0">
+            <label class="form-label">Bot Token</label>
+            <input class="form-control" id="tg_token" value="${escHtml(DB.settings?.telegramToken||'')}" placeholder="123456789:ABCdef..." />
+          </div>
+          <div class="form-group mb-0">
+            <label class="form-label">Chat ID</label>
+            <input class="form-control" id="tg_chatid" value="${escHtml(DB.settings?.telegramChatId||'')}" placeholder="Your Telegram user ID..." />
+          </div>
+        </div>
+        <div class="btn-row mt-8">
+          <button class="btn btn-secondary btn-sm" onclick="testTelegram()">📨 Test Connection</button>
+          <button class="btn btn-primary btn-sm" onclick="saveTelegramSettings()">💾 Save</button>
+        </div>
+      </div>
     </div>
 
     <!-- Shared Google Sheet -->
@@ -420,6 +447,37 @@ function renderAdminPanel() {
       </div>
     </div>
   `;
+}
+
+function saveTelegramSettings() {
+  const token = document.getElementById('tg_token')?.value?.trim();
+  const chatId = document.getElementById('tg_chatid')?.value?.trim();
+  DB.settings = { ...(DB.settings || {}), telegramToken: token, telegramChatId: chatId };
+  saveDB();
+  showToast('Telegram settings saved!', 'success');
+  renderAdminPanel();
+}
+
+async function testTelegram() {
+  const token = document.getElementById('tg_token')?.value?.trim();
+  const chatId = document.getElementById('tg_chatid')?.value?.trim();
+  if (!token || !chatId) { showToast('Enter Bot Token and Chat ID first', 'warning'); return; }
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: '✅ *LifePlanner Pro connected!*\nYou will now receive reminder notifications here.', parse_mode: 'Markdown' })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast('✅ Telegram connected! Check your chat.', 'success');
+      playSuccess();
+    } else {
+      showToast('❌ Failed: ' + (data.description || 'Check token/chat ID'), 'error');
+    }
+  } catch (e) {
+    showToast('❌ Error: ' + e.message, 'error');
+  }
 }
 
 function saveSharedSheet() {
