@@ -165,45 +165,74 @@ async function syncLocalToSheets() {
   }, 2000);
 }
 
-async function pushContactsToSheets() {
-  const contacts = getContacts().filter(c => shouldSyncItem(c));
-  for (const c of contacts) {
-    const row = [
-      c.id, c.ownerEmail||GAUTH.currentUser?.email||'', c.name, c.phone||'',
-      c.email||'', c.nric||'', c.dob||'', c.occupation||'', c.notes||'',
-      JSON.stringify(c.tags||[]), c.createdAt, c.updatedAt
-    ];
-    await sheetsFindAndUpdate('Contacts', 0, c.id, row);
+// Batch sync: ONE read + ONE update + ONE append per sheet (quota-friendly).
+// Old version did a full sheet read per item — 143 contacts = 143 reads,
+// which always exceeded Google's 60 reads/min quota and never finished.
+async function pushRowsBatch(sheetName, items, toRow) {
+  if (items.length === 0) return;
+  const existing = await sheetsReadAll(sheetName);
+  const idToSheetRow = new Map();
+  existing.forEach((r, i) => idToSheetRow.set(r[0], i + 2)); // +1 header, +1 1-based
+
+  const updates = [];
+  const appends = [];
+  for (const item of items) {
+    const row = toRow(item);
+    const sheetRow = idToSheetRow.get(item.id);
+    if (sheetRow) updates.push({ range: `${sheetName}!A${sheetRow}`, values: [row] });
+    else appends.push(row);
   }
+
+  if (updates.length > 0) {
+    await sheetsFetch(`${SHEETS_API}/${GAUTH.spreadsheetId}/values:batchUpdate`, {
+      method: 'POST',
+      body: JSON.stringify({ valueInputOption: 'RAW', data: updates })
+    });
+  }
+  if (appends.length > 0) {
+    await sheetsAppend(sheetName, appends);
+  }
+}
+
+function contactToRow(c) {
+  return [
+    c.id, c.ownerEmail||GAUTH.currentUser?.email||'', c.name, c.phone||'',
+    c.email||'', c.nric||'', c.dob||'', c.occupation||'', c.notes||'',
+    JSON.stringify(c.tags||[]), c.createdAt, c.updatedAt
+  ];
+}
+
+function caseToRow(c) {
+  return [
+    c.id, c.ownerEmail||GAUTH.currentUser?.email||'', c.contactId||'', c.contactName||'',
+    c.category||'', c.label||'', c.subLabel||'', String(c.currentStatus||1),
+    JSON.stringify(c.statusHistory||[]), c.remarks||'',
+    String(c.priority||false), String(c.kiv||false), String(c.followUp||false),
+    JSON.stringify(c.premiums||[]), JSON.stringify(c.examinations||[]),
+    JSON.stringify(c.recruitPrograms||[]), JSON.stringify(c.fieldwork||[]),
+    JSON.stringify(c.customFields||{}), c.nextStep||'', c.closedDate||'',
+    c.createdAt, c.updatedAt
+  ];
+}
+
+function reminderToRow(r) {
+  return [
+    r.id, r.ownerEmail||GAUTH.currentUser?.email||'', r.caseId||'', r.contactName||'',
+    r.category||'', r.title||'', r.date||'', r.time||'',
+    String(r.done||false), r.createdAt
+  ];
+}
+
+async function pushContactsToSheets() {
+  await pushRowsBatch('Contacts', getContacts().filter(c => shouldSyncItem(c)), contactToRow);
 }
 
 async function pushCasesToSheets() {
-  const cases = getCases().filter(c => shouldSyncItem(c));
-  for (const c of cases) {
-    const row = [
-      c.id, c.ownerEmail||GAUTH.currentUser?.email||'', c.contactId||'', c.contactName||'',
-      c.category||'', c.label||'', c.subLabel||'', String(c.currentStatus||1),
-      JSON.stringify(c.statusHistory||[]), c.remarks||'',
-      String(c.priority||false), String(c.kiv||false), String(c.followUp||false),
-      JSON.stringify(c.premiums||[]), JSON.stringify(c.examinations||[]),
-      JSON.stringify(c.recruitPrograms||[]), JSON.stringify(c.fieldwork||[]),
-      JSON.stringify(c.customFields||{}), c.nextStep||'', c.closedDate||'',
-      c.createdAt, c.updatedAt
-    ];
-    await sheetsFindAndUpdate('Cases', 0, c.id, row);
-  }
+  await pushRowsBatch('Cases', getCases().filter(c => shouldSyncItem(c)), caseToRow);
 }
 
 async function pushRemindersToSheets() {
-  const reminders = getReminders().filter(r => shouldSyncItem(r));
-  for (const r of reminders) {
-    const row = [
-      r.id, r.ownerEmail||GAUTH.currentUser?.email||'', r.caseId||'', r.contactName||'',
-      r.category||'', r.title||'', r.date||'', r.time||'',
-      String(r.done||false), r.createdAt
-    ];
-    await sheetsFindAndUpdate('Reminders', 0, r.id, row);
-  }
+  await pushRowsBatch('Reminders', getReminders().filter(r => shouldSyncItem(r)), reminderToRow);
 }
 
 function shouldSyncItem(item) {
