@@ -319,6 +319,7 @@ function renderContactDetail(contact, cases) {
       <span class="info-value">${escHtml(contact.phone||'—')} ${contact.phone ? `<a href="https://wa.me/6${contact.phone.replace(/\D/g,'')}" target="_blank" style="color:var(--green);font-size:12px;margin-left:8px">📱 WhatsApp</a>` : ''}</span>
     </div>
     ${fieldRow('Email', contact.email)}
+    ${contact.lastBlast ? `<div class="info-row"><span class="info-label">Last WhatsApp Blast</span><span class="info-value">${escHtml(contact.lastBlast.date)} <span class="text-xs text-muted">(${escHtml(contact.lastBlast.template||'')})</span></span></div>` : ''}
     <div class="info-row">
       <span class="info-label">Date of Birth</span>
       <span class="info-value">${contact.dob ? formatDOBDisplay(contact.dob) : '—'}${age !== null ? ` <span style="background:var(--green-light);color:var(--green);border-radius:12px;padding:2px 8px;font-size:11px;font-weight:600">Age ${age}</span>` : ''}</span>
@@ -1156,11 +1157,26 @@ function renderBulkWhatsApp() {
           </div>
         </div>
 
+        ${(() => {
+          const saved = _blastSession || _blastLoadSession();
+          const pending = saved ? saved.links.filter(l => l.status === 'pending').length : 0;
+          return pending > 0 ? `
+            <div class="card mb-16" style="border:2px solid var(--gold, #F59E0B)">
+              <div class="card-body" style="padding:12px 16px">
+                <div class="fw-600 mb-8">⏸ Unfinished blast session</div>
+                <p class="text-sm text-muted mb-12">${saved.links.filter(l=>l.status==='sent').length} sent, ${pending} still pending from your last session.</p>
+                <div class="flex gap-6">
+                  <button class="btn btn-primary btn-sm" style="flex:1" onclick="renderSendMode()">▶ Resume Sending</button>
+                  <button class="btn btn-secondary btn-sm" onclick="_blastClearSession();refreshBlast()">✕ Discard</button>
+                </div>
+              </div>
+            </div>` : '';
+        })()}
         <div class="card" style="border:2px solid var(--green)">
           <div class="card-body">
             <div class="fw-600 mb-8">📱 ${_blastSelected.size} contacts selected</div>
-            <p class="text-sm text-muted mb-12">Click "Generate Links" to get one WhatsApp link per contact. Click each link to send via WhatsApp — zero cost, uses your own WhatsApp!</p>
-            <button class="btn btn-primary" style="background:var(--green);width:100%" onclick="generateWALinks()">📤 Generate WhatsApp Links</button>
+            <p class="text-sm text-muted mb-12">Click "Start Send Mode" — you'll send to one contact at a time with a single tap each. Zero cost, uses your own WhatsApp!</p>
+            <button class="btn btn-primary" style="background:var(--green);width:100%" onclick="generateWALinks()">🚀 Start Send Mode</button>
           </div>
         </div>
 
@@ -1304,6 +1320,26 @@ function blastSelectNoInsurance() {
   refreshBlast();
 }
 
+const WA_BLAST_SESSION_KEY = 'wa_blast_session';
+let _blastSession = null; // { links:[{id,name,phone,url,msg,status:'pending'|'sent'|'skipped'}], idx, template, started }
+
+function _blastSaveSession() {
+  try { localStorage.setItem(WA_BLAST_SESSION_KEY, JSON.stringify(_blastSession)); } catch (e) {}
+}
+
+function _blastLoadSession() {
+  try {
+    const raw = localStorage.getItem(WA_BLAST_SESSION_KEY);
+    if (raw) _blastSession = JSON.parse(raw);
+  } catch (e) { _blastSession = null; }
+  return _blastSession;
+}
+
+function _blastClearSession() {
+  _blastSession = null;
+  try { localStorage.removeItem(WA_BLAST_SESSION_KEY); } catch (e) {}
+}
+
 function generateWALinks() {
   if (_blastSelected.size === 0) { showToast('Please select at least one contact', 'error'); return; }
   const msg = document.getElementById('blast_msg')?.value || '';
@@ -1317,42 +1353,138 @@ function generateWALinks() {
     const personalised = msg.replace(/{name}/g, c.name).replace(/{agent}/g, agentName);
     const phone = '6' + c.phone.replace(/\D/g, '').replace(/^6/, '');
     const url = `https://wa.me/${phone}?text=${encodeURIComponent(personalised)}`;
-    links.push({ name: c.name, phone: c.phone, url });
+    links.push({ id, name: c.name, phone: c.phone, url, status: 'pending' });
   });
 
-  const output = document.getElementById('wa_links_output');
-  if (!output) return;
-  output.innerHTML = `
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title">📤 ${links.length} WhatsApp Links Ready</div>
-        <button class="btn btn-secondary btn-sm" onclick="copyAllPhones()">📋 Copy All Numbers</button>
-      </div>
-      <div class="card-body" style="max-height:400px;overflow-y:auto">
-        <div class="text-sm text-muted mb-12">Click each green button to send via WhatsApp. Message is pre-filled with their name.</div>
-        ${links.map((l, i) => `
-          <div class="flex items-center gap-8 mb-8" style="padding:8px;background:var(--bg);border-radius:8px">
-            <span class="text-muted text-sm" style="width:20px">${i+1}</span>
-            ${avatarHTML(l.name, 28)}
-            <div style="flex:1">
-              <div class="fw-600 text-sm">${escHtml(l.name)}</div>
-              <div class="text-xs text-muted">${escHtml(l.phone)}</div>
-            </div>
-            <a href="${escHtml(l.url)}" target="_blank" class="btn btn-success btn-sm" style="background:var(--green);color:#fff;text-decoration:none" onclick="markSent(${i},this)">
-              📱 Send
-            </a>
-          </div>`).join('')}
-      </div>
-    </div>`;
-  showToast(`${links.length} links generated! Click each to send.`, 'success');
+  _blastSession = { links, idx: 0, template: _blastTemplate, started: new Date().toISOString() };
+  _blastSaveSession();
+  renderSendMode();
+  showToast(`Send Mode started — ${links.length} contacts queued! 🚀`, 'success');
   playSuccess();
 }
 
-function markSent(i, btn) {
-  btn.textContent = '✓ Sent';
-  btn.style.background = 'var(--text-muted)';
-  btn.style.pointerEvents = 'none';
+/* ── SEND MODE: guided one-at-a-time sending ───────── */
+function renderSendMode(listView = false) {
+  const output = document.getElementById('wa_links_output');
+  if (!output || !_blastSession) return;
+  const s = _blastSession;
+  const sent = s.links.filter(l => l.status === 'sent').length;
+  const skipped = s.links.filter(l => l.status === 'skipped').length;
+  const total = s.links.length;
+  const pct = total ? Math.round(((sent + skipped) / total) * 100) : 0;
+
+  // find current pending contact
+  let cur = null, curIdx = -1;
+  for (let i = 0; i < s.links.length; i++) {
+    if (s.links[i].status === 'pending') { cur = s.links[i]; curIdx = i; break; }
+  }
+
+  const progressBar = `
+    <div style="margin-bottom:10px">
+      <div class="flex items-center" style="justify-content:space-between;margin-bottom:4px">
+        <span class="fw-600 text-sm">🚀 Send Mode — ${sent} / ${total} sent${skipped ? ` (${skipped} skipped)` : ''}</span>
+        <span class="text-xs text-muted">${pct}%</span>
+      </div>
+      <div style="height:8px;background:var(--bg);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:var(--green);transition:width .3s"></div>
+      </div>
+    </div>`;
+
+  if (!cur) {
+    // All done!
+    output.innerHTML = `
+      <div class="card" style="border:2px solid var(--green)">
+        <div class="card-body" style="text-align:center;padding:24px">
+          ${progressBar}
+          <div style="font-size:40px;margin:8px 0">🎉</div>
+          <div class="fw-600" style="font-size:16px;margin-bottom:6px">All done! ${sent} message${sent===1?'':'s'} sent</div>
+          <div class="text-sm text-muted mb-12">${skipped ? skipped + ' contact(s) skipped. ' : ''}Great job staying in touch with your clients!</div>
+          <button class="btn btn-primary" onclick="_blastClearSession();refreshBlast()">✓ Finish & Close</button>
+        </div>
+      </div>`;
+    return;
+  }
+
+  if (listView) {
+    output.innerHTML = `
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">📤 ${total} WhatsApp Links</div>
+          <div class="flex gap-6">
+            <button class="btn btn-primary btn-sm" onclick="renderSendMode()">🚀 Focus Mode</button>
+            <button class="btn btn-secondary btn-sm" onclick="copyAllPhones()">📋 Copy Numbers</button>
+          </div>
+        </div>
+        <div class="card-body" style="max-height:400px;overflow-y:auto">
+          ${progressBar}
+          ${s.links.map((l, i) => `
+            <div class="flex items-center gap-8 mb-8" style="padding:8px;background:var(--bg);border-radius:8px;${l.status!=='pending'?'opacity:.55':''}">
+              <span class="text-muted text-sm" style="width:20px">${i+1}</span>
+              ${avatarHTML(l.name, 28)}
+              <div style="flex:1">
+                <div class="fw-600 text-sm">${escHtml(l.name)}</div>
+                <div class="text-xs text-muted">${escHtml(l.phone)}</div>
+              </div>
+              ${l.status === 'sent' ? '<span class="text-sm" style="color:var(--green)">✓ Sent</span>'
+                : l.status === 'skipped' ? '<span class="text-sm text-muted">⏭ Skipped</span>'
+                : `<a href="${escHtml(l.url)}" target="_blank" class="btn btn-success btn-sm" style="background:var(--green);color:#fff;text-decoration:none" onclick="blastMarkSent(${i})">📱 Send</a>`}
+            </div>`).join('')}
+        </div>
+      </div>`;
+    return;
+  }
+
+  // Focus mode — one contact at a time
+  const preview = decodeURIComponent(cur.url.split('?text=')[1] || '').slice(0, 220);
+  output.innerHTML = `
+    <div class="card" style="border:2px solid var(--green)">
+      <div class="card-body" style="padding:18px">
+        ${progressBar}
+        <div class="flex items-center gap-8 mb-8">
+          ${avatarHTML(cur.name, 40)}
+          <div style="flex:1">
+            <div class="fw-600" style="font-size:16px">${escHtml(cur.name)}</div>
+            <div class="text-sm text-muted">${escHtml(cur.phone)} • #${curIdx + 1} of ${total}</div>
+          </div>
+        </div>
+        <div style="background:var(--bg);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--text-secondary);white-space:pre-wrap;max-height:140px;overflow-y:auto;margin-bottom:12px">${escHtml(preview)}${preview.length >= 220 ? '…' : ''}</div>
+        <a href="${escHtml(cur.url)}" target="_blank" class="btn btn-primary" style="background:var(--green);width:100%;font-size:15px;padding:12px;text-decoration:none;display:block;text-align:center" onclick="blastMarkSent(${curIdx})">
+          📱 Send to ${escHtml(cur.name)} →
+        </a>
+        <div class="flex gap-6 mt-8">
+          <button class="btn btn-secondary btn-sm" style="flex:1" onclick="blastSkipCurrent(${curIdx})">⏭ Skip</button>
+          <button class="btn btn-secondary btn-sm" style="flex:1" onclick="renderSendMode(true)">📋 List View</button>
+          <button class="btn btn-secondary btn-sm" style="flex:1" onclick="if(confirm('End this blast session? Progress is saved.')){_blastClearSession();refreshBlast()}">✕ End</button>
+        </div>
+        <div class="text-xs text-muted mt-8" style="text-align:center">Tap Send → WhatsApp opens with message ready → press send → come back, next contact is loaded automatically</div>
+      </div>
+    </div>`;
 }
+
+function blastMarkSent(i) {
+  if (!_blastSession || !_blastSession.links[i]) return;
+  const l = _blastSession.links[i];
+  l.status = 'sent';
+  _blastSaveSession();
+  // Log on the contact record so we never double-message
+  const c = getContact(l.id);
+  if (c) {
+    c.lastBlast = { date: new Date().toISOString().slice(0, 10), template: _blastSession.template };
+    if (typeof saveDB === 'function') saveDB();
+  }
+  // Small delay so the wa.me link opens before re-render removes the element
+  setTimeout(() => renderSendMode(), 300);
+}
+
+function blastSkipCurrent(i) {
+  if (!_blastSession || !_blastSession.links[i]) return;
+  _blastSession.links[i].status = 'skipped';
+  _blastSaveSession();
+  renderSendMode();
+}
+
+// Backward compat for old list markup
+function markSent(i, btn) { blastMarkSent(i); }
 
 function copyAllPhones() {
   const nums = [];
