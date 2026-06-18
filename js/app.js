@@ -327,8 +327,11 @@ function onLocalAuthReady() {
   setTimeout(() => {
     if (typeof GAUTH !== 'undefined' && GAUTH.accessToken) {
       showToast('☁️ Auto-syncing...', 'info');
-      if (typeof pullTeamDataFromSheets === 'function') pullTeamDataFromSheets();
-      if (typeof startSheetsSync === 'function') startSheetsSync();
+      (async () => {
+        if (typeof pullMyDataFromSheets === 'function') await pullMyDataFromSheets();
+        if (typeof pullTeamDataFromSheets === 'function') await pullTeamDataFromSheets();
+        if (typeof startSheetsSync === 'function') startSheetsSync();
+      })();
     }
   }, 2000);
 }

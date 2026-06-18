@@ -128,7 +128,11 @@ async function onAuthReady() {
   updateAuthUI();
   if (typeof startAutoLogout === 'function') startAutoLogout();
 
-  // Start auto-sync (silently fails if API not available)
+  // Pull my data DOWN first (rebuilds a fresh device from the Sheet),
+  // then start auto-sync to push local changes back up.
+  try {
+    if (typeof pullMyDataFromSheets === 'function') await pullMyDataFromSheets();
+  } catch (e) { console.warn('Initial pull failed:', e); }
   try { startSheetsSync(); } catch (e) {}
 }
 

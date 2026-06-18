@@ -34,9 +34,17 @@ async function sheetsFetch(url, options = {}) {
 }
 
 /* ---- SPREADSHEET SETUP ---- */
+// Default central Sheet — so a brand-new device opens the SAME spreadsheet
+// instead of creating its own empty one.
+const DEFAULT_SHARED_SHEET_ID = '1yqD5ypEvsRjPim3iAnyMFmNRQPIjFfwAc9MacHZHGYE';
+
 async function sheetsEnsureSpreadsheet() {
   // Shared sheet ID takes priority (admin-configured central sheet)
-  const sharedId = localStorage.getItem('lp_shared_sheet_id');
+  let sharedId = localStorage.getItem('lp_shared_sheet_id');
+  if (!sharedId) {
+    sharedId = DEFAULT_SHARED_SHEET_ID;
+    localStorage.setItem('lp_shared_sheet_id', sharedId);
+  }
   if (sharedId) {
     localStorage.setItem('sheets_id', sharedId);
   }
@@ -278,6 +286,48 @@ function mergeSheetData(collection, rows, converter) {
     if (!item) return;
     // Only add if owner is visible to me
     if (!canViewUser(item.ownerEmail || item.owner_email || '')) return;
+    const idx = DB[collection].findIndex(x => x.id === item.id);
+    if (idx === -1) DB[collection].push(item);
+    else if (new Date(item.updatedAt||0) > new Date(DB[collection][idx].updatedAt||0)) {
+      DB[collection][idx] = item;
+    }
+  });
+}
+
+/* ---- PULL OWN DATA (all roles, incl. agents) — runs on login so a fresh
+        device rebuilds its local DB from the Sheet ---- */
+async function pullMyDataFromSheets() {
+  if (!GAUTH.accessToken || !GAUTH.spreadsheetId) return;
+  const myEmail = (GAUTH.currentUser?.email || '').toLowerCase();
+  try {
+    showSyncStatus('loading');
+    const [sheetContacts, sheetCases, sheetReminders] = await Promise.all([
+      sheetsReadAll('Contacts'),
+      sheetsReadAll('Cases'),
+      sheetsReadAll('Reminders')
+    ]);
+    mergeMyRows('contacts', sheetContacts, sheetRowToContact, myEmail);
+    mergeMyRows('cases', sheetCases, sheetRowToCase, myEmail);
+    mergeMyRows('reminders', sheetReminders, sheetRowToReminder, myEmail);
+    saveDB();
+    renderCurrentPage();
+    updateBadges();
+    if (typeof refreshSidebarCategories === 'function') refreshSidebarCategories();
+    showSyncStatus('synced');
+  } catch (e) {
+    console.warn('Pull (own) failed:', e);
+    showSyncStatus('error');
+  }
+}
+
+// Merge rows that belong to me OR have no owner (legacy data); newest wins.
+function mergeMyRows(collection, rows, converter, myEmail) {
+  rows.forEach(row => {
+    if (!row[0] || row[0] === '__DELETED__') return;
+    const item = converter(row);
+    if (!item) return;
+    const owner = (item.ownerEmail || item.owner_email || '').toLowerCase();
+    if (owner && owner !== myEmail) return; // someone else's row — skip
     const idx = DB[collection].findIndex(x => x.id === item.id);
     if (idx === -1) DB[collection].push(item);
     else if (new Date(item.updatedAt||0) > new Date(DB[collection][idx].updatedAt||0)) {
