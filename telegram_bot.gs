@@ -6,11 +6,18 @@
 const BOT_TOKEN = ''; // ← paste your Telegram bot token here
 const ALLOWED_CHAT_ID = ''; // ← paste your Chat ID here (security: only you can use it)
 const SPREADSHEET_ID = ''; // ← paste your Google Sheet ID here
+const ANTHROPIC_API_KEY = ''; // ← paste your Anthropic API key here (sk-ant-...) for the AI Assistant
 
 // ─── ENTRY POINT ───────────────────────────────────────────────
 function doPost(e) {
   try {
     const update = JSON.parse(e.postData.contents);
+
+    // AI Assistant proxy (called from the web app, not Telegram)
+    if (update.ai === true) {
+      return handleAIProxy(update);
+    }
+
     const msg = update.message || update.edited_message;
     if (!msg) return ok();
 
@@ -208,6 +215,43 @@ function handleSearch(chatId, query) {
   }
 
   sendMessage(chatId, msg);
+}
+
+// ─── AI ASSISTANT PROXY (Anthropic Claude) ──────────────────────
+function handleAIProxy(data) {
+  if (!ANTHROPIC_API_KEY) {
+    return jsonOut({ ok: false, error: 'AI not configured: add ANTHROPIC_API_KEY in Apps Script.' });
+  }
+  try {
+    const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: {
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      muteHttpExceptions: true,
+      payload: JSON.stringify({
+        model: 'claude-opus-4-8',
+        max_tokens: data.max_tokens || 1500,
+        system: data.system || 'You are a helpful assistant for a Malaysian AIA insurance advisor.',
+        messages: data.messages || []
+      })
+    });
+    const body = JSON.parse(res.getContentText());
+    if (body.error) {
+      return jsonOut({ ok: false, error: body.error.message || 'AI error' });
+    }
+    const text = (body.content && body.content[0] && body.content[0].text) || '';
+    return jsonOut({ ok: true, text: text });
+  } catch (err) {
+    return jsonOut({ ok: false, error: String(err) });
+  }
+}
+
+function jsonOut(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 // ─── HELPERS ───────────────────────────────────────────────────

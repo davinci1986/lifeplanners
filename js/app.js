@@ -20,6 +20,7 @@ const PAGE_MAP = {
   aisolution:  { render: renderAISolution,      title: 'AI Solution' },
   others:      { render: renderOthers,          title: 'Others' },
   crm:         { render: renderCRM,             title: 'CRM Contacts' },
+  aiassistant: { render: renderAIAssistant,     title: 'AI Assistant' },
   reminders:   { render: renderRemindersPage,   title: 'Reminders' },
   kiv:         { render: renderKIV,             title: 'KIV Listing' },
   followup:    { render: renderFollowUp,        title: 'Follow-Up' }
