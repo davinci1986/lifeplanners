@@ -3,22 +3,67 @@
    ============================================ */
 
 let crmSearch = '';
-let crmTab = 'contacts'; // 'contacts' | 'blast'
+let crmTab = 'contacts'; // 'contacts' | 'followups' | 'blast'
 let crmViewMode = 'grid'; // 'list' | 'grid' | 'large' | 'xlarge'
 let crmFilters  = { race: '', gender: '', state: '', maritalStatus: '', tag: '', hasCases: '', birthdayDays: '' };
 let crmFilterOpen = false;
+let crmSort = 'name'; // 'name' | 'newest' | 'birthday'
+let _crmSearchTimer = null;
+
+// Debounced search — updates ONLY the list area so the page doesn't thrash
+// and the search box keeps focus while typing.
+function crmSearchInput(val) {
+  crmSearch = val;
+  clearTimeout(_crmSearchTimer);
+  _crmSearchTimer = setTimeout(renderCRMList, 180);
+}
+
+function sortCRMContacts(list) {
+  const s = [...list];
+  if (crmSort === 'newest') {
+    s.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  } else if (crmSort === 'birthday') {
+    s.sort((a, b) => {
+      const da = getContactBirthdayDays(a), db = getContactBirthdayDays(b);
+      return (da === null ? 9999 : da) - (db === null ? 9999 : db);
+    });
+  } else {
+    s.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }
+  return s;
+}
+
+// Re-render just the contact list + count (used by search/sort for speed)
+function renderCRMList() {
+  const area = document.getElementById('crmListArea');
+  if (!area) return renderCRM();
+  const contacts = getContacts();
+  const searched = crmSearch.length >= 2 ? searchContacts(crmSearch) : contacts;
+  const display = sortCRMContacts(applyCRMFilters(searched));
+  area.innerHTML = display.length === 0
+    ? emptyState('👥', 'No contacts', (crmSearch || activeCRMFilterCount()) ? 'No results match your filters' : 'Add your first contact')
+    : renderContactsByView(display);
+  const cnt = document.getElementById('crmCount');
+  if (cnt) cnt.textContent = `Showing ${display.length} of ${contacts.length} contacts`;
+}
 
 function renderCRM() {
   document.getElementById('pageTitle').textContent = 'CRM Contacts';
   const contacts = getContacts();
   const searched = crmSearch.length >= 2 ? searchContacts(crmSearch) : contacts;
-  const displayContacts = applyCRMFilters(searched);
+  const displayContacts = sortCRMContacts(applyCRMFilters(searched));
   const activeFilters = activeCRMFilterCount();
+  const followUpCount = getFollowUpCount();
 
   document.getElementById('content').innerHTML = `
     <div class="tab-bar mb-16" style="border-bottom:1px solid var(--border)">
       <button class="tab-btn ${crmTab==='contacts'?'active':''}" onclick="switchCRMTab('contacts')">👥 Contacts (${contacts.length})</button>
+      <button class="tab-btn ${crmTab==='followups'?'active':''}" onclick="switchCRMTab('followups')">🔥 Follow-ups${followUpCount?` <span style="background:var(--red);color:#fff;border-radius:10px;padding:0 6px;font-size:11px;font-weight:700">${followUpCount}</span>`:''}</button>
       <button class="tab-btn ${crmTab==='blast'?'active':''}" onclick="switchCRMTab('blast')">📱 Bulk WhatsApp</button>
+    </div>
+
+    <div id="crm-followups-panel" style="display:${crmTab==='followups'?'block':'none'}">
+      ${crmTab==='followups' ? renderFollowUps() : ''}
     </div>
 
     <div id="crm-contacts-panel" style="display:${crmTab==='contacts'?'block':'none'}">
@@ -26,17 +71,22 @@ function renderCRM() {
         <div class="stat-card"><div class="stat-icon" style="background:#E8F0FE">👥</div><div class="stat-num" style="color:var(--blue)">${contacts.length}</div><div class="stat-label">Total Contacts</div></div>
         <div class="stat-card"><div class="stat-icon" style="background:#E8F8EE">📈</div><div class="stat-num" style="color:var(--green)">${contacts.filter(c=>getCasesForContact(c.id).some(x=>x.category==='sales')).length}</div><div class="stat-label">With Sales</div></div>
         <div class="stat-card"><div class="stat-icon" style="background:#F3E8FD">👤</div><div class="stat-num" style="color:var(--purple)">${contacts.filter(c=>getCasesForContact(c.id).some(x=>x.category==='recruitment'||x.category==='onboarding')).length}</div><div class="stat-label">Agents</div></div>
-        <div class="stat-card"><div class="stat-icon" style="background:#FFE5EA">🎂</div><div class="stat-num" style="color:var(--pink)">${getUpcomingBirthdays(30).length}</div><div class="stat-label">Birthdays (30d)</div></div>
+        <div class="stat-card" style="cursor:pointer" onclick="crmFilters.birthdayDays='30';crmFilterOpen=true;renderCRM()" title="Show birthdays in next 30 days"><div class="stat-icon" style="background:#FFE5EA">🎂</div><div class="stat-num" style="color:var(--pink)">${getUpcomingBirthdays(30).length}</div><div class="stat-label">Birthdays (30d)</div></div>
       </div>
       <!-- Toolbar -->
       <div class="flex items-center mb-8" style="flex-wrap:wrap;gap:8px">
         <div class="search-bar" style="width:260px">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" placeholder="Search contacts..." value="${escHtml(crmSearch)}" oninput="crmSearch=this.value;renderCRM()" />
+          <input type="text" placeholder="Search contacts..." value="${escHtml(crmSearch)}" oninput="crmSearchInput(this.value)" />
         </div>
         <button class="btn btn-secondary btn-sm ${crmFilterOpen?'active':''}" onclick="crmFilterOpen=!crmFilterOpen;renderCRM()" style="white-space:nowrap">
           🔽 Filters${activeFilters>0?` <span style="background:var(--blue);color:#fff;border-radius:10px;padding:0 6px;font-size:11px;font-weight:700;margin-left:4px">${activeFilters}</span>`:''}
         </button>
+        <select class="form-control" style="width:auto;font-size:12px;padding:6px 8px" onchange="crmSort=this.value;renderCRMList()" title="Sort">
+          <option value="name" ${crmSort==='name'?'selected':''}>A → Z</option>
+          <option value="newest" ${crmSort==='newest'?'selected':''}>Newest first</option>
+          <option value="birthday" ${crmSort==='birthday'?'selected':''}>🎂 Birthday soon</option>
+        </select>
         ${renderCRMViewToggle()}
         <div style="margin-left:auto;display:flex;gap:8px">
           <button class="btn btn-secondary" onclick="importCRMExcel()" title="Import contacts from Excel / CSV">📤 Import</button>
@@ -51,12 +101,14 @@ function renderCRM() {
       ${crmFilterOpen ? renderCRMFilterPanel() : ''}
       <!-- Result count -->
       <div class="text-xs text-muted mb-12" style="display:flex;align-items:center;gap:8px">
-        Showing ${displayContacts.length} of ${contacts.length} contacts
+        <span id="crmCount">Showing ${displayContacts.length} of ${contacts.length} contacts</span>
         ${(activeFilters > 0 || crmSearch.length >= 2) ? `<button style="background:none;border:none;color:var(--red);cursor:pointer;font-size:11px;padding:0" onclick="crmSearch='';clearCRMFilters()">✕ Clear All</button>` : ''}
       </div>
-      ${displayContacts.length === 0
-        ? emptyState('👥', 'No contacts', (crmSearch || activeFilters) ? 'No results match your filters' : 'Add your first contact')
-        : renderContactsByView(displayContacts)}
+      <div id="crmListArea">
+        ${displayContacts.length === 0
+          ? emptyState('👥', 'No contacts', (crmSearch || activeFilters) ? 'No results match your filters' : 'Add your first contact')
+          : renderContactsByView(displayContacts)}
+      </div>
     </div>
 
     <div id="crm-blast-panel" style="display:${crmTab==='blast'?'block':'none'}">
@@ -69,6 +121,84 @@ function switchCRMTab(tab) {
   crmTab = tab;
   renderCRM();
   playClick();
+}
+
+/* ─── Follow-ups: who to contact today ─── */
+const CRM_STALE_DAYS = 14;
+
+function getStaleCasesList() {
+  const now = Date.now();
+  return getCases().filter(c => {
+    if (c.kiv) return false;
+    const defs = getStatusDef(c.category) || [];
+    const done = defs.length && (c.completedSteps || []).length >= defs.length;
+    if (done) return false;
+    const upd = new Date(c.updatedAt || c.createdAt || 0).getTime();
+    return upd < now - CRM_STALE_DAYS * 86400000;
+  }).sort((a, b) => new Date(a.updatedAt || 0) - new Date(b.updatedAt || 0));
+}
+
+function getFollowUpCount() {
+  return getDueReminders().length + getStaleCasesList().length + getUpcomingBirthdays(7).length;
+}
+
+function renderFollowUps() {
+  const due = getDueReminders().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const stale = getStaleCasesList();
+  const bdays = getUpcomingBirthdays(7);
+  const today = new Date().toISOString().split('T')[0];
+
+  if (due.length === 0 && stale.length === 0 && bdays.length === 0) {
+    return `<div style="padding:40px 0">${emptyState('🎉', 'All caught up!', 'No reminders due, no stale cases, no birthdays this week.')}</div>`;
+  }
+
+  const section = (title, count, color, body) => `
+    <div class="section-header" style="margin-top:16px">
+      <div class="section-title">${title} <span class="label-badge" style="background:${color};color:#fff">${count}</span></div>
+    </div>${body}`;
+
+  // Due / overdue reminders
+  const dueHtml = due.length === 0 ? '' : section('🔔 Reminders Due', due.length, 'var(--red)',
+    `<div class="case-list">${due.map(r => {
+      const overdue = (r.date || '') < today;
+      return `<div class="crm-list-row" ${r.caseId ? `onclick="closeContactModalBtn&&closeContactModalBtn();openCaseById('${r.caseId}')"` : ''} style="cursor:${r.caseId ? 'pointer' : 'default'}">
+        <div style="font-size:18px;flex-shrink:0">${overdue ? '⚠️' : '🔔'}</div>
+        <div class="crm-list-main">
+          <div class="crm-list-name">${escHtml(r.title || 'Reminder')}</div>
+          <div class="crm-list-sub">${escHtml(r.contactName || '')}${r.category ? ' · ' + escHtml(r.category) : ''} · <span style="color:${overdue ? 'var(--red)' : 'var(--text-muted)'}">${escHtml(r.date || '')}${overdue ? ' (overdue)' : ''}</span></div>
+        </div>
+      </div>`;
+    }).join('')}</div>`);
+
+  // Stale cases
+  const staleHtml = stale.length === 0 ? '' : section('🥶 Cold Cases', stale.length, 'var(--orange)',
+    `<div class="text-xs text-muted" style="margin:-4px 0 8px">No update in ${CRM_STALE_DAYS}+ days</div><div class="case-list">${stale.slice(0, 30).map(c => {
+      const days = Math.floor((Date.now() - new Date(c.updatedAt || c.createdAt || 0).getTime()) / 86400000);
+      return `<div class="crm-list-row" onclick="closeContactModalBtn&&closeContactModalBtn();openCaseById('${c.id}')" style="cursor:pointer">
+        <div style="font-size:16px;flex-shrink:0">${catMeta(c.category).icon}</div>
+        <div class="crm-list-main">
+          <div class="crm-list-name">${escHtml(c.contactName || '—')}</div>
+          <div class="crm-list-sub">${escHtml(c.label || catMeta(c.category).label)} · <span class="status-badge ${statusClass(c.category, c.currentStatus)}">${escHtml(getStatusLabel(c.category, c.currentStatus))}</span></div>
+        </div>
+        <div style="font-size:11px;color:var(--orange);flex-shrink:0">${days}d ago</div>
+      </div>`;
+    }).join('')}</div>`);
+
+  // Birthdays this week
+  const bdayHtml = bdays.length === 0 ? '' : section('🎂 Birthdays This Week', bdays.length, 'var(--pink)',
+    `<div class="case-list">${bdays.map(c => {
+      const d = getContactBirthdayDays(c);
+      return `<div class="crm-list-row" onclick="openContact('${c.id}')" style="cursor:pointer">
+        <div class="contact-avatar" style="background:${getAvatarColor(c.name)};width:32px;height:32px;font-size:12px;margin-bottom:0;flex-shrink:0">${getInitials(c.name)}</div>
+        <div class="crm-list-main">
+          <div class="crm-list-name">${escHtml(c.name)}</div>
+          <div class="crm-list-sub" style="color:var(--pink)">🎂 ${d === 0 ? 'Today!' : 'in ' + d + ' day' + (d === 1 ? '' : 's')}</div>
+        </div>
+        <div onclick="event.stopPropagation()" style="flex-shrink:0">${c.phone ? `<a href="https://wa.me/6${c.phone.replace(/\D/g,'')}?text=${encodeURIComponent('Happy Birthday ' + (c.name || '') + '! 🎂')}" target="_blank" style="text-decoration:none;font-size:16px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:var(--green-light)">📱</a>` : ''}</div>
+      </div>`;
+    }).join('')}</div>`);
+
+  return dueHtml + staleHtml + bdayHtml;
 }
 
 /* ─── CRM Filters & View Mode ─── */
@@ -194,7 +324,10 @@ function renderContactRow(contact) {
       </div>
       <div class="crm-list-tags">${(contact.tags||[]).slice(0,3).map(t=>`<span class="contact-tag">${escHtml(t)}</span>`).join('')}</div>
       <div class="crm-list-cases">${cats.map(cat=>`<span class="contact-case-chip" style="background:${catMeta(cat).bg};color:${catMeta(cat).color}">${catMeta(cat).icon}</span>`).join('')}</div>
-      <div style="width:64px;text-align:right;flex-shrink:0">${bday!==null?`<span style="font-size:11px;color:var(--pink)">🎂 ${bday===0?'Today':bday+'d'}</span>`:''}</div>
+      <div style="width:60px;text-align:right;flex-shrink:0">${bday!==null?`<span style="font-size:11px;color:var(--pink)">🎂 ${bday===0?'Today':bday+'d'}</span>`:''}</div>
+      <div style="display:flex;gap:4px;flex-shrink:0" onclick="event.stopPropagation()">
+        ${contact.phone?`<a href="https://wa.me/6${contact.phone.replace(/\D/g,'')}" target="_blank" title="WhatsApp" style="text-decoration:none;font-size:16px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:var(--green-light)">📱</a><a href="tel:${escHtml(contact.phone)}" title="Call" style="text-decoration:none;font-size:15px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:var(--bg)">📞</a>`:''}
+      </div>
     </div>`;
 }
 
