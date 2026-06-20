@@ -6,7 +6,7 @@
 const BOT_TOKEN = ''; // ← paste your Telegram bot token here
 const ALLOWED_CHAT_ID = ''; // ← paste your Chat ID here (security: only you can use it)
 const SPREADSHEET_ID = ''; // ← paste your Google Sheet ID here
-const ANTHROPIC_API_KEY = ''; // ← paste your Anthropic API key here (sk-ant-...) for the AI Assistant
+const GROQ_API_KEY = ''; // ← paste your Groq API key here (gsk_...) for the AI Assistant (free)
 
 // ─── ENTRY POINT ───────────────────────────────────────────────
 function doPost(e) {
@@ -219,30 +219,31 @@ function handleSearch(chatId, query) {
 
 // ─── AI ASSISTANT PROXY (Anthropic Claude) ──────────────────────
 function handleAIProxy(data) {
-  if (!ANTHROPIC_API_KEY) {
-    return jsonOut({ ok: false, error: 'AI not configured: add ANTHROPIC_API_KEY in Apps Script.' });
+  if (!GROQ_API_KEY) {
+    return jsonOut({ ok: false, error: 'AI not configured: add GROQ_API_KEY in Apps Script.' });
   }
   try {
-    const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+    // Groq is OpenAI-compatible: system goes in as the first message.
+    const messages = [];
+    if (data.system) messages.push({ role: 'system', content: data.system });
+    (data.messages || []).forEach(m => messages.push({ role: m.role, content: m.content }));
+
+    const res = UrlFetchApp.fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'post',
       contentType: 'application/json',
-      headers: {
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
-      },
+      headers: { 'Authorization': 'Bearer ' + GROQ_API_KEY },
       muteHttpExceptions: true,
       payload: JSON.stringify({
-        model: 'claude-opus-4-8',
+        model: 'llama-3.3-70b-versatile',
         max_tokens: data.max_tokens || 1500,
-        system: data.system || 'You are a helpful assistant for a Malaysian AIA insurance advisor.',
-        messages: data.messages || []
+        messages: messages
       })
     });
     const body = JSON.parse(res.getContentText());
     if (body.error) {
       return jsonOut({ ok: false, error: body.error.message || 'AI error' });
     }
-    const text = (body.content && body.content[0] && body.content[0].text) || '';
+    const text = (body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content) || '';
     return jsonOut({ ok: true, text: text });
   } catch (err) {
     return jsonOut({ ok: false, error: String(err) });

@@ -67,7 +67,7 @@ function renderAIAssistant() {
     <div style="max-width:860px;margin:0 auto">
       <div class="card mb-16" style="background:linear-gradient(135deg,rgba(124,58,237,0.08),rgba(236,72,153,0.08));border-color:rgba(124,58,237,0.3)">
         <div class="card-body">
-          <div class="fw-700" style="font-size:16px;margin-bottom:4px">🤖 AI Assistant <span style="font-size:11px;color:var(--text-muted);font-weight:500">· powered by Claude</span></div>
+          <div class="fw-700" style="font-size:16px;margin-bottom:4px">🤖 AI Assistant <span style="font-size:11px;color:var(--text-muted);font-weight:500">· free AI</span></div>
           <div class="text-sm text-muted">Ask about your clients, draft WhatsApp messages, or get next-best-action ideas. It reads your CRM data live.</div>
         </div>
       </div>
