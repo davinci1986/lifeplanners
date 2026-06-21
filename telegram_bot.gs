@@ -18,6 +18,10 @@ function doPost(e) {
       return handleAIProxy(update);
     }
 
+    // Two-factor login OTP (called from the web app)
+    if (update.otp === 'send')   return handleOtpSend(update);
+    if (update.otp === 'verify') return handleOtpVerify(update);
+
     const msg = update.message || update.edited_message;
     if (!msg) return ok();
 
@@ -253,6 +257,31 @@ function handleAIProxy(data) {
 function jsonOut(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ─── TWO-FACTOR LOGIN OTP ───────────────────────────────────────
+function handleOtpSend(data) {
+  try {
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const nonce = Utilities.getUuid();
+    CacheService.getScriptCache().put('otp_' + nonce, code, 300); // 5 min
+    sendMessage(ALLOWED_CHAT_ID,
+      '🔐 Your LifePlanner login code: *' + code + '*\n\nExpires in 5 minutes. If this wasn\'t you, ignore this message.');
+    return jsonOut({ ok: true, nonce: nonce });
+  } catch (err) {
+    return jsonOut({ ok: false, error: String(err) });
+  }
+}
+
+function handleOtpVerify(data) {
+  const cache = CacheService.getScriptCache();
+  const key = 'otp_' + (data.nonce || '');
+  const stored = cache.get(key);
+  if (stored && stored === String(data.code || '').trim()) {
+    cache.remove(key);
+    return jsonOut({ ok: true });
+  }
+  return jsonOut({ ok: false, error: 'Invalid or expired code' });
 }
 
 // ─── HELPERS ───────────────────────────────────────────────────

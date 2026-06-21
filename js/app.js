@@ -289,11 +289,92 @@ async function localLogin() {
     if (idx >= 0) { all[idx].password = hashed; saveLocalUsers(all); user.password = hashed; }
   }
 
+  // Two-factor: Telegram OTP (if enabled by admin)
+  if (DB.settings?.twoFactor === 'telegram') {
+    startOtpChallenge(user);
+    return;
+  }
+
+  completeLocalLogin(user);
+}
+
+function completeLocalLogin(user) {
   LOCAL_AUTH.currentUser = user;
   sessionStorage.setItem('lp_session', JSON.stringify(user));
   startAutoLogout();
   onLocalAuthReady();
 }
+
+/* ---------- Telegram OTP 2FA ---------- */
+async function startOtpChallenge(user) {
+  showOtpScreen('Sending code to your Telegram…', true);
+  try {
+    const res = await fetch(aiProxyUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ otp: 'send' })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Could not send code');
+    _otpState = { nonce: data.nonce, user };
+    showOtpScreen('Enter the 6-digit code sent to your Telegram.', false);
+  } catch (e) {
+    showOtpScreen('⚠️ ' + e.message + ' — check Apps Script is deployed.', false, true);
+  }
+}
+
+let _otpState = null;
+
+function showOtpScreen(msg, loading, errored) {
+  let el = document.getElementById('otpOverlay');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'otpOverlay';
+    el.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(15,18,30,0.92);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
+    document.body.appendChild(el);
+  }
+  el.innerHTML = `
+    <div style="background:var(--card,#1e1e2a);border:1px solid var(--border,#333);border-radius:16px;padding:28px;width:340px;max-width:90vw;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5)">
+      <div style="font-size:30px;margin-bottom:6px">🔐</div>
+      <div style="font-weight:700;font-size:16px;margin-bottom:6px">Two-Factor Verification</div>
+      <div style="font-size:13px;color:var(--text-muted,#9aa);margin-bottom:16px">${escHtml(msg)}</div>
+      ${loading ? '<div class="spinner"></div>' : `
+        <input id="otpInput" inputmode="numeric" maxlength="6" autocomplete="one-time-code"
+          style="width:100%;text-align:center;letter-spacing:8px;font-size:22px;padding:10px;border-radius:10px;border:1.5px solid var(--border,#444);background:var(--bg,#11131c);color:var(--text,#fff);margin-bottom:14px"
+          placeholder="••••••" onkeydown="if(event.key==='Enter')verifyOtp()" />
+        <button class="btn btn-primary" style="width:100%;margin-bottom:8px" onclick="verifyOtp()">Verify</button>
+        <div style="display:flex;justify-content:space-between;font-size:12px">
+          <button class="btn-text-link" style="color:var(--text-muted,#9aa)" onclick="resendOtp()">Resend code</button>
+          <button class="btn-text-link" style="color:var(--text-muted,#9aa)" onclick="cancelOtp()">Cancel</button>
+        </div>
+      `}
+    </div>`;
+  if (!loading) { const i = document.getElementById('otpInput'); if (i) i.focus(); }
+}
+
+async function verifyOtp() {
+  const code = document.getElementById('otpInput')?.value?.trim();
+  if (!code || !_otpState) return;
+  showOtpScreen('Verifying…', true);
+  try {
+    const res = await fetch(aiProxyUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ otp: 'verify', nonce: _otpState.nonce, code })
+    });
+    const data = await res.json();
+    if (!data.ok) { showOtpScreen('❌ ' + (data.error || 'Invalid code') + '. Try again.', false); return; }
+    const user = _otpState.user;
+    _otpState = null;
+    document.getElementById('otpOverlay')?.remove();
+    completeLocalLogin(user);
+  } catch (e) {
+    showOtpScreen('⚠️ ' + e.message, false);
+  }
+}
+
+function resendOtp() { if (_otpState) startOtpChallenge(_otpState.user); }
+function cancelOtp() { _otpState = null; document.getElementById('otpOverlay')?.remove(); }
 
 function localLogout() {
   LOCAL_AUTH.currentUser = null;
@@ -360,6 +441,23 @@ function renderAdminPanel() {
   document.getElementById('content').innerHTML = `
     <div class="section-header mb-16">
       <div class="section-title">⚙ Admin Panel</div>
+    </div>
+
+    <!-- Security / 2FA -->
+    <div class="card mb-24">
+      <div class="card-header"><div class="card-title">🔐 Login Security</div></div>
+      <div class="card-body">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <div>
+            <div style="font-weight:600;font-size:14px">Two-Factor Login (Telegram OTP)</div>
+            <div style="font-size:12px;color:var(--text-secondary)">After password, a 6-digit code is sent to your Telegram and must be entered to log in. Uses your existing Telegram bot. Requires the Apps Script to be deployed.</div>
+          </div>
+          <label class="switch" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="tfaToggle" ${DB.settings?.twoFactor === 'telegram' ? 'checked' : ''} onchange="saveTwoFactor(this.checked)" />
+            <span style="font-weight:600;font-size:13px;color:${DB.settings?.twoFactor==='telegram'?'var(--green)':'var(--text-muted)'}" id="tfaState">${DB.settings?.twoFactor==='telegram'?'ON':'OFF'}</span>
+          </label>
+        </div>
+      </div>
     </div>
 
     <!-- Notifications -->
@@ -514,6 +612,14 @@ function saveTelegramSettings() {
   saveDB();
   showToast('Telegram settings saved!', 'success');
   renderAdminPanel();
+}
+
+function saveTwoFactor(on) {
+  DB.settings = { ...(DB.settings || {}), twoFactor: on ? 'telegram' : 'off' };
+  saveDB();
+  const st = document.getElementById('tfaState');
+  if (st) { st.textContent = on ? 'ON' : 'OFF'; st.style.color = on ? 'var(--green)' : 'var(--text-muted)'; }
+  showToast(on ? 'Two-factor login enabled' : 'Two-factor login disabled', 'success');
 }
 
 async function testTelegram() {
