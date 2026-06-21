@@ -92,6 +92,13 @@ function createContact(data) {
     aiaPolicies: Array.isArray(data.aiaPolicies) ? data.aiaPolicies : [],
     referralSource: data.referralSource || '',
     socialMedia: data.socialMedia || '',
+    // Will-referral / MLM downline tracking
+    referredBy: data.referredBy || '',         // contactId of the will owner (upline)
+    referralRole: data.referralRole || '',     // executor|replacement_executor|beneficiary|guardian|replacement_guardian|witness|other
+    referralStatus: data.referralStatus || '', // named|contacted|appointment|client|declined
+    referralType: data.referralType || '',     // source, e.g. 'snapwill'
+    referralCaseId: data.referralCaseId || '', // the will case they were named in
+    referralRelationship: data.referralRelationship || '',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };

@@ -72,6 +72,12 @@ function openSnapwillCase(id) {
   `;
   body = body.replace('<!-- Special fields for sales status 5 (premiums) -->', typesSection + '<!-- Special fields for sales status 5 (premiums) -->');
 
+  // Will Referral capture (MLM downline) — needs a linked contact as the will owner
+  if (c.contactId) {
+    const refSection = renderWillReferralSection(c.id, c.contactId);
+    body = body.replace('<!-- Special fields for sales status 5 (premiums) -->', refSection + '<!-- Special fields for sales status 5 (premiums) -->');
+  }
+
   // Appointment details section (at status 2 or if already set)
   if (c.currentStatus === 2 || c.customFields?.appointment) {
     const appt = c.customFields?.appointment || {};

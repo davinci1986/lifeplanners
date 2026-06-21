@@ -21,6 +21,7 @@ const PAGE_MAP = {
   others:      { render: renderOthers,          title: 'Others' },
   crm:         { render: renderCRM,             title: 'CRM Contacts' },
   aiassistant: { render: renderAIAssistant,     title: 'AI Assistant' },
+  referrals:   { render: renderReferralNetwork, title: 'Referral Network' },
   reminders:   { render: renderRemindersPage,   title: 'Reminders' },
   kiv:         { render: renderKIV,             title: 'KIV Listing' },
   followup:    { render: renderFollowUp,        title: 'Follow-Up' }
