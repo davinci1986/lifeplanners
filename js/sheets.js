@@ -204,7 +204,7 @@ async function pushRowsBatch(sheetName, items, toRow) {
 
 function contactToRow(c) {
   return [
-    c.id, c.ownerEmail||GAUTH.currentUser?.email||'', c.name, c.phone||'',
+    c.id, c.ownerEmail||currentUserEmail()||'', c.name, c.phone||'',
     c.email||'', c.nric||'', c.dob||'', c.occupation||'', c.notes||'',
     JSON.stringify(c.tags||[]), c.createdAt, c.updatedAt
   ];
@@ -212,7 +212,7 @@ function contactToRow(c) {
 
 function caseToRow(c) {
   return [
-    c.id, c.ownerEmail||GAUTH.currentUser?.email||'', c.contactId||'', c.contactName||'',
+    c.id, c.ownerEmail||currentUserEmail()||'', c.contactId||'', c.contactName||'',
     c.category||'', c.label||'', c.subLabel||'', String(c.currentStatus||1),
     JSON.stringify(c.statusHistory||[]), c.remarks||'',
     String(c.priority||false), String(c.kiv||false), String(c.followUp||false),
@@ -225,7 +225,7 @@ function caseToRow(c) {
 
 function reminderToRow(r) {
   return [
-    r.id, r.ownerEmail||GAUTH.currentUser?.email||'', r.caseId||'', r.contactName||'',
+    r.id, r.ownerEmail||currentUserEmail()||'', r.caseId||'', r.contactName||'',
     r.category||'', r.title||'', r.date||'', r.time||'',
     String(r.done||false), r.createdAt
   ];
@@ -246,7 +246,7 @@ async function pushRemindersToSheets() {
 function shouldSyncItem(item) {
   // Only sync items owned by current user (others' items synced by them)
   const owner = item.ownerEmail || item.owner_email || '';
-  return !owner || owner === GAUTH.currentUser?.email;
+  return !owner || owner === currentUserEmail();
 }
 
 /* ---- PULL SHEETS → LOCAL (for managers) ---- */
@@ -298,7 +298,7 @@ function mergeSheetData(collection, rows, converter) {
         device rebuilds its local DB from the Sheet ---- */
 async function pullMyDataFromSheets() {
   if (!GAUTH.accessToken || !GAUTH.spreadsheetId) return;
-  const myEmail = (GAUTH.currentUser?.email || '').toLowerCase();
+  const myEmail = (currentUserEmail() || '').toLowerCase();
   try {
     showSyncStatus('loading');
     const [sheetContacts, sheetCases, sheetReminders] = await Promise.all([

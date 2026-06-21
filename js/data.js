@@ -49,6 +49,15 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
+// Unified identity: the local admin account and the Google account share one
+// email, so data ownership + Sheets sync resolve to the same person whichever
+// way you logged in. (admin's email is chongwei1986@gmail.com — see app.js seed.)
+function currentUserEmail() {
+  return (typeof GAUTH !== 'undefined' && GAUTH.currentUser && GAUTH.currentUser.email)
+      || (typeof LOCAL_AUTH !== 'undefined' && LOCAL_AUTH.currentUser && LOCAL_AUTH.currentUser.email)
+      || '';
+}
+
 /* ---------- CONTACTS ---------- */
 function getContacts() { return DB.contacts; }
 
@@ -66,7 +75,7 @@ function findOrCreateContact(name, phone = '') {
 function createContact(data) {
   const c = {
     id: uid(),
-    ownerEmail: data.ownerEmail || (typeof GAUTH !== 'undefined' ? GAUTH.currentUser?.email : '') || '',
+    ownerEmail: data.ownerEmail || currentUserEmail(),
     name: data.name || '',
     phone: data.phone || '',
     email: data.email || '',
@@ -191,7 +200,7 @@ function createCase(data) {
   const allCats = data.categories && data.categories.length > 0 ? data.categories : [primaryCat];
   const c = {
     id: uid(),
-    ownerEmail: data.ownerEmail || (typeof GAUTH !== 'undefined' ? GAUTH.currentUser?.email : '') || '',
+    ownerEmail: data.ownerEmail || currentUserEmail(),
     contactId: data.contactId || null,
     contactName: data.contactName || '',
     category: primaryCat,
@@ -279,7 +288,7 @@ function getReminders() { return DB.reminders || []; }
 function addReminder(data) {
   const r = {
     id: uid(),
-    ownerEmail: data.ownerEmail || (typeof GAUTH !== 'undefined' ? GAUTH.currentUser?.email : '') || '',
+    ownerEmail: data.ownerEmail || currentUserEmail(),
     caseId: data.caseId || null,
     contactId: data.contactId || null,
     contactName: data.contactName || '',
