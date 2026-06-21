@@ -44,6 +44,8 @@ function gauthInit() {
     GAUTH.accessToken = saved;
     GAUTH.tokenExpiry = Number(expiry);
     GAUTH.currentUser = JSON.parse(user);
+    // Owner is always admin — correct any stale cached role immediately
+    if (GAUTH.currentUser && isOwnerEmail(GAUTH.currentUser.email)) GAUTH.currentUser.role = 'admin';
     // Sync to sessionStorage too
     sessionStorage.setItem('gauth_token', saved);
     sessionStorage.setItem('gauth_expiry', expiry);
@@ -115,8 +117,8 @@ async function onAuthReady() {
   try {
     await loadCurrentUserRole();
   } catch (e) {
-    console.warn('Could not load user role — defaulting to agent:', e);
-    if (GAUTH.currentUser) GAUTH.currentUser.role = 'agent';
+    console.warn('Could not load user role — using fallback:', e);
+    if (GAUTH.currentUser) GAUTH.currentUser.role = isOwnerEmail(GAUTH.currentUser.email) ? 'admin' : 'agent';
   }
 
   if (typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission();
@@ -152,30 +154,38 @@ function gauthSignOut() {
 }
 
 /* ---------- ROLE LOADING ---------- */
+// Owner accounts that are always admin, regardless of the Users sheet.
+// (Mirrors the hard-coded local admin so Google login matches.)
+const ADMIN_EMAILS = ['chongwei1986@gmail.com'];
+function isOwnerEmail(email) {
+  return ADMIN_EMAILS.includes((email || '').toLowerCase().trim());
+}
+
 async function loadCurrentUserRole() {
   if (!GAUTH.currentUser) return;
   const email = GAUTH.currentUser.email;
+  const owner = isOwnerEmail(email);
 
   try {
     const users = await sheetsReadAll('Users');
     const userRow = users.find(r => (r[0]||'').toLowerCase() === email.toLowerCase());
     if (userRow) {
-      GAUTH.currentUser.role         = userRow[2] || 'agent';
+      GAUTH.currentUser.role         = owner ? 'admin' : (userRow[2] || 'agent');
       GAUTH.currentUser.manager_email = userRow[3] || '';
       GAUTH.currentUser.agent_code   = userRow[4] || '';
       GAUTH.currentUser.displayName  = userRow[1] || GAUTH.currentUser.name;
     } else {
-      // First time: add as agent, prompt admin to set role
+      // First time: add to the Users sheet (owner as admin, others as agent)
       await sheetsAppend('Users', [[
-        email, GAUTH.currentUser.name, 'agent', '', '', 'active',
+        email, GAUTH.currentUser.name, owner ? 'admin' : 'agent', '', '', 'active',
         new Date().toISOString()
       ]]);
-      GAUTH.currentUser.role = 'agent';
+      GAUTH.currentUser.role = owner ? 'admin' : 'agent';
     }
     sessionStorage.setItem('gauth_user', JSON.stringify(GAUTH.currentUser));
   } catch (e) {
     console.warn('Could not load user role:', e);
-    GAUTH.currentUser.role = 'agent';
+    GAUTH.currentUser.role = owner ? 'admin' : 'agent';
   }
 }
 
