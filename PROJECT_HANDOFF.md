@@ -1,105 +1,97 @@
-# PROJECT_HANDOFF.md — LifePlanner Pro
+# PROJECT_HANDOFF — LifePlanner Pro
 
-## What Is This
-Browser-only CRM + case management for Keith's AIA insurance agent team in Malaysia.
-No server. No build step. localStorage + Google Sheets auto-sync. GitHub Pages hosting.
+Reflects **current state (2026-06-21)**. Obsolete ALPP scraper detail lives in `ARCHIVE.md`.
+
+## What it is
+Browser-only CRM + case management for Keith's AIA insurance agent team in Malaysia. No server, no build step. localStorage is the per-device source of truth; Google Sheets provides cross-device sync; Google Drive provides backup. Hosted on GitHub Pages.
 
 **Live:** https://davinci1986.github.io/lifeplanners/
 **Local:** `C:\Users\Keith\todo-dashboard\`
-**Login:** admin / admin
-**Git push:** `git push origin master:main`
-**Git commit:** `git -c user.name="Keith" -c user.email="chongwei1986@gmail.com" commit -m "..."`
-
-After push: GitHub Pages takes ~2 min. Users need Ctrl+Shift+R.
+**Login:** `admin` / `admin`
+**Git:** local `master` → remote `main`. Push `git push origin master:main`; commit with `git -c user.name="Keith" -c user.email="chongwei1986@gmail.com" commit -m "..."`. GitHub Pages ~2 min; users Ctrl+Shift+R.
 
 ---
 
-## Tech Stack
-
+## Tech stack
 | Layer | Detail |
 |---|---|
 | Language | Vanilla HTML/CSS/JS — no framework, no bundler |
 | Data | `localStorage['lifeplanner_v1']` — single JSON object |
-| Auth | Local username/password (SHA-256 hashed) + Google OAuth |
-| Cloud Sync | Google Sheets auto-sync (`gauth.js` + `sheets.js`) |
-| Cloud Backup | Google Drive backup (`gdrive.js`) |
+| Auth | Local username/password (SHA-256) + Google OAuth |
+| Cloud sync | Google Sheets (`gauth.js` + `sheets.js`) — shared sheet, all devices |
+| Backup | Google Drive (`gdrive.js`) |
 | Excel | SheetJS CDN |
+| Bot + AI | Google Apps Script web app (`telegram_bot.gs`) — Telegram bot + Groq AI proxy |
 | Hosting | GitHub Pages (static) |
 
 ---
 
-## Current Status: ~95% Complete
+## Status: ~98%, in production
 
-### ✅ Done
-- CRM: 140 contacts, 20+ fields, 4 view modes, filter, search, Excel import/export, Bulk WhatsApp
-- CRM enriched: phone, IC/NRIC, DOB, gender, nationality, occupation, employer (from ALPP)
-- ALPP scraping complete: Pass 1 + Pass 2 + targeted 51-contact pass
-- ALPP Pass 3 scraper built (`alpp_scraper_pass3.js`) — plan details: name, SA, premium
-- All case modules in **to-do mode**: Sales, Onboarding, Claims, Servicing, Recruitment
-- Auto-reminders fire correctly on step completion
-- Sound system: 12 Web Audio sounds · Glass design system
-- **Auto-sync**: saveDB() → Google Sheets; login → auto-pull from Sheets
-- Google token persists in localStorage (no re-auth across sessions)
-- **Security**: SHA-256 password hashing, brute-force lockout (5 attempts/15 min), auto-logout (30 min)
-- **Google login**: resilient — works even if Sheets API not yet enabled
+### ✅ Done & live
+- CRM: ~143 contacts, 20+ fields, 4 view modes, search/filter, Excel + ALPP import, Bulk WhatsApp.
+- CRM UX overhaul: debounced search, sort dropdown, per-row WhatsApp/call buttons, **Follow-ups tab** (due reminders + stale cases + birthdays).
+- All case modules in to-do mode (`completedSteps[]`): Sales, Claims, Servicing, Recruitment, Onboarding, Snapwill, AI Solution, Others.
+- Auto-reminders fire on step completion; 12 Web Audio sounds; glass design system.
+- Multi-device sync (shared sheet + pull-on-login for every role).
+- Security: SHA-256 hashing, brute-force lockout, auto-logout.
+- Telegram bot (Apps Script) — deployed.
+- AI Assistant (Groq, free) — Apps Script Version 6, live and smoke-tested.
+- Account merge — local admin + Google = one identity (`currentUserEmail()`), shared data.
+- Will Referral Network (`referrals.js`) — MLM downline from will-named people; tree + dashboard + 3D.
+- Telegram OTP 2FA — admin toggle (default off); server-generated code via Telegram on login.
 
-### 🔴 Bugs Pending Fix
-| # | Bug | File | Fix |
-|---|---|---|---|
-| 1 | Snapwill shows Claims progress for multi-category cases | `snapwill.js` line ~55 | `renderCaseDetail({...c, category:'snapwill'}, contact)` |
-| 2 | Label picker shows random UID prefix (`mpye0qpq...`) | `sales.js` line ~130 | Change `${l.id} — ${l.label}` to `${l.label}` |
-
-### ⚠️ Needs Action
-- Enable Google Sheets API: https://console.cloud.google.com/apis/library/sheets.googleapis.com?project=638079686621
-- Complete ALPP Pass 3 scraping (~6/199 done — resume scraper)
-
-### ❌ Not Started
-1. Team Dashboard — hierarchy tree + per-agent stats
-2. Dashboard charts — pipeline bar chart, conversion rate
+### ⏳ / open
+- **Roll the Groq key** (shown in chat) → re-paste in Apps Script → redeploy.
+- **ALPP live sync** decision (no public API; scraper→import only — best as a one-click bookmarklet).
+- Verify two legacy bugs (below). Team dashboard charts (later).
 
 ---
 
-## Auto-Sync Architecture
-
+## Multi-device sync architecture
 ```
-Any device → local login (admin/admin)
-  → gauthInit() restores Google token from localStorage (silent)
-  → onLocalAuthReady() → auto-pull from Google Sheets (2s delay)
-  → Any saveDB() call → syncLocalToSheets() auto-push
+Login (local or Google)
+  → restore Google token from localStorage (silent)
+  → await pullMyDataFromSheets()      // owner-filtered, ALL roles; rebuilds device from cloud
+  → await pullTeamDataFromSheets()    // team/managers view
+  → startSheetsSync()                 // begin push-on-save
+saveDB() → localStorage + gdScheduleSave() (Drive) + syncLocalToSheets() (Sheets push)
 ```
+- **Shared sheet:** `DEFAULT_SHARED_SHEET_ID = '1yqD5ypEvsRjPim3iAnyMFmNRQPIjFfwAc9MacHZHGYE'` (in `sheets.js`). A fresh device with no stored Sheet ID opens this one — never creates a duplicate.
+- `mergeMyRows(collection, rows, converter, myEmail)` merges only rows owned by the current user (or legacy no-owner rows); newest `updatedAt` wins.
+- Requires Google Sheets API enabled on the linked Cloud project.
 
-**One-time setup per device:** Login with Google once → token persists.
-**Google Sheets API must be enabled** in linked Google Cloud project `638079686621`.
+## AI Assistant + Telegram bot (Apps Script)
+- One Apps Script web app serves both. `doPost(e)`: if `update.ai === true` → `handleAIProxy()`; else Telegram routing.
+- **AI proxy:** `handleAIProxy()` calls Groq `https://api.groq.com/openai/v1/chat/completions`, model `llama-3.3-70b-versatile`, system prompt + messages from the browser, key from `GROQ_API_KEY`. Returns `{ok, text}` as JSON.
+- **Front-end** (`js/ai.js`): `aiProxyCall()` POSTs `text/plain` (avoids CORS preflight) to the exec URL. `buildCRMContext()` makes a privacy-safe digest (no NRIC/full phone). Features: chat, `aiGenerateWhatsApp()`, `aiGenerateSummary()`, quick prompts. Page `renderAIAssistant()` registered in `app.js` `PAGE_MAP` as `aiassistant`; nav item in `index.html`; script tag before `reminders.js`.
+- **Telegram:** commands `/due /reminders /kiv /summary /search /overdue /priority /debug /help`; CacheService dedupe; restricted to `ALLOWED_CHAT_ID`.
+- Project edit URL and exec URL: see SESSION_SUMMARY.
 
 ---
 
 ## Database
-
 **Key:** `localStorage['lifeplanner_v1']`
 **Shape:** `{ contacts[], cases[], reminders[], settings{}, customCategories[], customLabels{}, globalStatusDefs{} }`
 
-### Contact Object
+### Contact
 ```js
 {
-  id, ownerEmail, name, phone, email, nric, dob, occupation,
-  employer, nationality,
-  notes, tags[],
-  race, stayArea, state, maritalStatus, dependants,
+  id, ownerEmail, name, phone, email, nric, dob, occupation, employer, nationality,
+  notes, tags[], race, stayArea, state, maritalStatus, dependants,
   jobType, income, langPref, gender, religion,
   existingInsurance[],   // ⚠️ ALWAYS ARRAY — insurer names
-  aiaPolicies[],         // NEW — [{policyNo, insured, planName, sumAssured, annualPremium, policyStatus, commencedDate}]
+  aiaPolicies[],         // ALWAYS ARRAY — [{policyNo, insured, planName, sumAssured, annualPremium, policyStatus, commencedDate}]
   referralSource, socialMedia, createdAt, updatedAt
 }
 ```
-
-### Case Object
+### Case
 ```js
 {
   id, ownerEmail, contactId, contactName,
   category,          // primary: sales|claims|servicing|recruitment|onboarding|snapwill|aisolution|others
-  categories[],      // all selected categories (multi-category support)
-  label, subLabel,
-  currentStatus,     // int — max(completedSteps)
+  categories[],      // all selected (multi-category)
+  label, subLabel, currentStatus,   // currentStatus = max(completedSteps)
   completedSteps[],  // int[] — to-do mode
   statusHistory[], remarks, reminders[], priority, kiv, followUp,
   premiums[], customFields{}, createdAt, updatedAt
@@ -108,118 +100,64 @@ Any device → local login (admin/admin)
 
 ---
 
-## Status Definitions
-
-### Sales (8 steps)
-Approached → Fact-Finding → Policy Summary → Closing Appointment → Closed/Proposed → Cementing Session → Ask for Referrals → KIV Listing
-
-### Claims (10 steps)
-Ask Receipts → Pending Submission → Submitted (autoReminder 7d) → Checked Status → Checking Again → Pending Memo → Send Requirement → Submit Memo → Pending Memo Follow-Up (autoReminder 7d) → Claim Completed
-
-### Servicing (9 steps)
-Fill Forms → Send Link → Reminder to Approve → Check Status (autoReminder 7d) → Pending Memo → Send Requirement → Submit Memo → Pending Memo Follow-Up (autoReminder 7d) → Status Approved
-
-### Recruitment (6 steps)
-Approached → Fact-Finding → Closing Appointment → Candidate Consider (autoReminder 3d) → Candidate Agreed → Candidate KIV
-
-### Onboarding (9 steps)
-Key in BALP (autoReminder 90d) → Arrange Exam → 20 Names Hotlist (autoReminder 5d) → Training → Policy Review → Fieldwork → Fieldwork Closed → Exam Complete → Completed
+## Status definitions
+- **Sales (8):** Approached → Fact-Finding → Policy Summary → Closing Appointment → Closed/Proposed → Cementing Session → Ask for Referrals → KIV Listing
+- **Claims (10):** Ask Receipts → Pending Submission → Submitted (autoReminder 7d) → Checked Status → Checking Again → Pending Memo → Send Requirement → Submit Memo → Pending Memo Follow-Up (7d) → Claim Completed
+- **Servicing (9):** Fill Forms → Send Link → Reminder to Approve → Check Status (7d) → Pending Memo → Send Requirement → Submit Memo → Pending Memo Follow-Up (7d) → Status Approved
+- **Recruitment (6):** Approached → Fact-Finding → Closing Appointment → Candidate Consider (3d) → Candidate Agreed → Candidate KIV
+- **Onboarding (9):** Key in BALP (90d) → Arrange Exam → 20 Names Hotlist (5d) → Training → Policy Review → Fieldwork → Fieldwork Closed → Exam Complete → Completed
 
 ---
 
-## Security Architecture (NEW)
-
-```
-Passwords stored as: 'sha256:' + hex (SubtleCrypto SHA-256)
-Migration: plaintext passwords auto-upgrade to hash on successful login
-
-Brute-force: localStorage['lp_lockout'] = { count, username, until }
-  5 failures → until = Date.now() + 15*60*1000
-  Shows: "X attempts remaining" / "Locked for Y minutes"
-
-Auto-logout: 30 min inactivity
-  Activity events: mousemove, keydown, click, touchstart
-  Fires: localLogout() / gauthSignOut() + stopAutoLogout()
-```
-
----
-
-## To-Do Mode Flow
-
+## To-do mode flow (all modules)
 ```
 renderStatusStep(c, stepDef, options)
   completedSteps.includes(stepDef.n)?
-    YES → green checked → click unchecks via handleStepClick
+    YES → green checked → click unchecks (handleStepClick)
     NO  → click → openSetStatusWithDate → confirmSetStatusWithDate
-              → toggleStepDone(caseId, stepN, remark, date)
-                  → toggles completedSteps[]
-                  → currentStatus = Math.max(...completedSteps)
+              → toggleStepDone(caseId, stepN, remark, date)   // NOT setStatus()
+                  → toggles completedSteps[]; currentStatus = max(completedSteps)
                   → checkStepAutoReminder()
 ```
-
-**Recruitment branch (after step 3):**
-- `renderConsiderChoices` → `handleConsiderChoice` → `toggleStepDone`
-- Step 5 (Agreed) → `checkAutoTransfer` → creates onboarding case
-- Step 6 (KIV) → `reactivateFromKIV`
+- Claims + Servicing share `renderCaseDetail` from `sales.js`.
+- Recruitment: own `renderRecruitDetail`; step 5 (Agreed) auto-creates an onboarding case (`checkAutoTransfer`); step 6 (KIV) `reactivateFromKIV`.
+- Snapwill: must call `renderCaseDetail({...c, category:'snapwill'}, contact)` so multi-category cases show Snapwill steps.
 
 ---
 
-## Critical Rules
+## Security
+```
+Passwords: 'sha256:' + hex (SubtleCrypto). Plaintext auto-upgrades on first login.
+Brute-force: localStorage['lp_lockout'] = {count, username, until}; 5 fails → 15 min.
+Auto-logout: 30 min inactivity (mousemove/keydown/click/touchstart reset). → localLogout()/gauthSignOut().
+hashPassword(), verifyPassword(), startAutoLogout(), stopAutoLogout(). saveUser()/localLogin() are async.
+```
 
+---
+
+## Critical rules
 | Rule | Detail |
 |---|---|
-| `existingInsurance` | Always ARRAY. `Array.isArray()` before any operation. |
-| `aiaPolicies` | Always ARRAY. Populated by ALPP Pass 3 import. |
-| `_blastFilter.insuranceFilter` | `[]` not `''`. Only array field in blast filter. |
-| `confirmSetStatusWithDate()` | Calls `toggleStepDone()` NOT `setStatus()`. |
-| `saveUser()` | Async — hashes password. Must be called with `await` or as onclick async. |
-| `localLogin()` | Async — awaits hash verification. |
-| Glass CSS | `var(--glass)` always. Never hardcode `rgba()`. |
-| Git branch | Local `master` → remote `main`. Push: `master:main`. |
-| Working dir | `C:\Users\Keith\todo-dashboard\` — NOT nested copy. |
-| ALPP search btn | `#ContentPlaceHolder1_btnEditSearch` — NOT `input[type=submit]` (hits PRINT first) |
+| `existingInsurance`, `aiaPolicies` | Always ARRAY — `Array.isArray()` first |
+| `_blastFilter.insuranceFilter` | `[]` not `''` |
+| `confirmSetStatusWithDate()` | calls `toggleStepDone()` NOT `setStatus()` |
+| `saveDB()` | after every mutation (also pushes to Sheets + Drive) |
+| Glass CSS | `var(--glass)` always; never hardcode `rgba()` |
+| New features | go in the owning module — no new JS files unless a genuinely new surface (e.g. `ai.js`) |
+| Git branch | local `master` → remote `main` (`master:main`) |
+| Working dir | `C:\Users\Keith\todo-dashboard\` — not a nested copy |
 
 ---
 
-## ALPP Enrichment
-
-### Status
-| Pass | Status | Result |
-|---|---|---|
-| Pass 1 (ILP, ~200 policies) | ✅ COMPLETE | 74 contacts created |
-| Pass 2 (traditional, 93 policies) | ✅ COMPLETE | Scraped via Chrome MCP |
-| Targeted (51 name-only contacts) | ✅ COMPLETE | Enriched via processALPPEnrichment() |
-| **Pass 3 (plan details)** | 🟡 IN PROGRESS | ~6/199 done |
-
-### Pass 3 — How to Run
-1. Login to ALPP → MY SERVICING → Policy Status Enquiry → search by Policy Number → click any result
-2. You're now on `/policy-enquiry-one-glance` detail page
-3. F12 → Console → paste `alpp_scraper_pass3.js` → Enter
-4. Wait ~20 min (199 policies × ~6s). Partial downloads every 25. Final JSON auto-downloads.
-5. Import: CRM → 🔄 ALPP Enrich → select JSON (auto-detected as Pass 3)
-
-### Pass 3 — Resume via Chrome MCP
-- Inject `window._step` pattern from `alpp_scraper_pass3.js` via `javascript_tool`
-- State auto-saves to `localStorage['alpp_p3']` — survives page refresh
-- Key fix: wait for plan table to appear (`/[A-Z]{2,4}\d\s+[\w][\w\s\-]+\n/`) before extracting
-- Pick main plan = highest annual premium (not RM 0.00)
-
-### processALPPEnrichment() — Pass 1/2 format
-```js
-{ policyNo, owner, phone, email, nric, dob, gender, nationality, occupation, employer }
-```
-Matches by owner name. Fills empty fields only.
-
-### processALPPPass3() — Pass 3 format
-```js
-{ policyNo, owner, insured, planName, sumAssured, annualPremium, policyStatus, commencedDate, allPlans[], _pass:3 }
-```
-Adds `aiaPolicies[]` to matching contact. Adds 'AIA' to `existingInsurance[]`.
+## Known issues to verify
+These were logged earlier and may already be fixed — confirm before re-fixing:
+1. **Snapwill progress steps** — multi-category (claims+snapwill) case may show Claims steps in the Snapwill view. Fix if present: `renderCaseDetail({...c, category:'snapwill'}, contact)` in `snapwill.js` `openSnapwillCase()`.
+2. **Label UID prefix** — new-case label picker may render `${l.id} — ${l.label}` (UID visible). Fix if present: show `${l.label}` only in `sales.js` `renderNewCaseForm()`.
 
 ---
 
-## Business Context
-
-- Keith = AIA agent, Code A3719, PN PBG CK PARTNERS, Malaysia
-- Team roles: `admin` / `dm` / `um` / `agent`
-- Malaysian market: BM import column names, race/religion/langPref fields, festive WA templates
+## Business context
+- Keith = AIA agent, Code A3719, PN PBG CK PARTNERS, Malaysia. (Refer to AIA generically, never brand-specific in client-facing copy.)
+- Team roles: `admin` / `dm` / `um` / `agent`.
+- Malaysian market: BM import column names; race/religion/langPref fields; festive WhatsApp templates; RM currency.
+- Related but **separate** project: marketing site `insurancepro2u.com` (not this repo).

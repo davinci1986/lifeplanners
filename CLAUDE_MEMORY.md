@@ -1,196 +1,142 @@
-# CLAUDE_MEMORY.md — LifePlanner Pro
+# CLAUDE_MEMORY — LifePlanner Pro
 
-## The 5 Rules That Break Everything If Wrong
+Durable facts and gotchas. Current as of 2026-06-21. (ALPP scraper internals → `ARCHIVE.md`.)
 
+## The rules that break everything if wrong
 ```
-1. existingInsurance  → ALWAYS ARRAY. Array.isArray() before any use.
+1. existingInsurance / aiaPolicies → ALWAYS ARRAY. Array.isArray() before use.
 2. confirmSetStatusWithDate() → toggleStepDone() NOT setStatus()
 3. _blastFilter.insuranceFilter → [] not ''
 4. All case modules in to-do mode (completedSteps[])
 5. git push → master:main (not master:master)
+6. saveDB() after every mutation (it also pushes to Sheets + Drive)
 ```
 
----
+## Architecture decisions (don't re-debate)
+- Vanilla JS + `innerHTML` template literals + `escHtml()`. No framework.
+- One file per module. New features go in the owning module — exception: genuinely new surfaces get their own file (e.g. `js/ai.js`).
+- `DB` singleton in memory; `saveDB()` persists + syncs.
+- Inline `onclick="fn('${id}')"` in templates (no addEventListener for dynamic content).
+- Glass CSS: `var(--glass)` + `var(--glass-blur)`; never hardcode `rgba()`.
+- localStorage = per-device truth; Google Sheets = cross-device sync; Drive = backup.
 
-## Architecture Decisions (don't re-debate)
-
-- **Vanilla JS + innerHTML** — no framework. Template literals + `escHtml()` everywhere.
-- **One file per module** — no new JS files. New features go in the owning module.
-- **DB singleton** — `DB` in memory, `saveDB()` to persist. Always call after mutations.
-- **Inline onclick** — `onclick="fn('${id}')"` in templates. No addEventListener for dynamic content.
-- **Glass CSS** — `var(--glass)` + `var(--glass-blur)` on all cards/modals. Never hardcode `rgba()`.
-
----
-
-## Security Layer (NEW — implemented this session)
-
-```js
-// Password hashing (SubtleCrypto SHA-256, browser-native)
-hashPassword(pwd) → 'sha256:' + hexHash
-verifyPassword(input, stored) → bool  // handles both sha256: and legacy plaintext
-
-// Brute-force lockout
-localStorage['lp_lockout'] = { count, username, until }
-5 failures → 15 min lock → shown to user
-
-// Auto-logout
-startAutoLogout() / stopAutoLogout()
-30 min inactivity → localLogout() / gauthSignOut()
-Called from: onLocalAuthReady(), onAuthReady(), localLogout(), gauthSignOut()
-
-// saveUser() is now async — hashes password before storing
-// localLogin() is now async — verifies hash, auto-upgrades plaintext
+## Multi-device sync (current)
+```
+Shared sheet: DEFAULT_SHARED_SHEET_ID = '1yqD5ypEvsRjPim3iAnyMFmNRQPIjFfwAc9MacHZHGYE' (sheets.js)
+  → a device with no stored Sheet ID opens THIS one (never creates a duplicate).
+Login: await pullMyDataFromSheets()  // owner-filtered, ALL roles (agents not blocked)
+     → pullTeamDataFromSheets() → startSheetsSync()
+mergeMyRows(collection, rows, converter, myEmail): keep my-owned + legacy(no-owner) rows; newest updatedAt wins.
+saveDB() → localStorage + gdScheduleSave() (Drive) + syncLocalToSheets() (Sheets push, if token).
+Requires Google Sheets API enabled on the linked Cloud project.
 ```
 
----
+## AI Assistant (Groq, free) + Telegram bot — Apps Script proxy
+```
+One Apps Script web app (telegram_bot.gs) serves both.
+doPost(e): update.ai === true → handleAIProxy(); else Telegram command routing.
+handleAIProxy(): POST Groq /openai/v1/chat/completions, model 'llama-3.3-70b-versatile',
+  Authorization: Bearer GROQ_API_KEY; returns {ok, text} JSON via ContentService.
+Front-end js/ai.js:
+  aiProxyCall(messages, system, maxTokens) → fetch exec URL, Content-Type text/plain
+    (text/plain avoids the CORS preflight; Apps Script JSON stays readable).
+  buildCRMContext() → privacy-safe digest (NO NRIC, NO full phone).
+  Features: chat (aiSend), aiGenerateWhatsApp, aiGenerateSummary, quick prompts.
+  Page renderAIAssistant → PAGE_MAP key 'aiassistant' (app.js); nav item in index.html;
+  <script src="js/ai.js"> loads before reminders.js.
+AI_PROXY_URL_DEFAULT in ai.js = the Apps Script exec URL (overridable via DB.settings.aiProxyUrl).
+Apps Script constants (deployed editor only; blank in local file): BOT_TOKEN, ALLOWED_CHAT_ID, SPREADSHEET_ID, GROQ_API_KEY.
+NOTE: any edit to the Apps Script needs a manual REDEPLOY (Deploy → Manage deployments → ✏️ → New version).
+```
 
-## Contact Schema (`data.js` `createContact`)
+## CRM UX (current)
+```
+crmSearchInput(val): 180ms debounce → renderCRMList() (repaints #crmListArea + #crmCount only, not whole page).
+crmSort: 'name' | 'newest' | 'birthday' (sortCRMContacts()).
+Per-row quick actions: 📱 wa.me + 📞 tel: (event.stopPropagation so row onclick doesn't fire).
+Follow-ups tab: getDueReminders + getStaleCasesList (CRM_STALE_DAYS=14) + upcoming birthdays;
+  getFollowUpCount() → tab badge; renderFollowUps() renders 3 sections.
+```
 
+## Contact schema (`data.js` createContact)
 ```js
 {
-  id, ownerEmail, name, phone, email, nric, dob, occupation,
-  employer, nationality,       // from ALPP enrichment
-  notes, tags[],
-  race, stayArea, state, maritalStatus, dependants,
+  id, ownerEmail, name, phone, email, nric, dob, occupation, employer, nationality,
+  notes, tags[], race, stayArea, state, maritalStatus, dependants,
   jobType, income, langPref, gender, religion,
-  existingInsurance[],         // ⚠️ ALWAYS ARRAY — insurer names e.g. ['AIA','Prudential']
-  aiaPolicies[],               // NEW — AIA policy details from Pass 3
+  existingInsurance[],   // ⚠️ ARRAY of insurer names e.g. ['AIA','Prudential']
+  aiaPolicies[],         // ARRAY — AIA policy details
   referralSource, socialMedia, createdAt, updatedAt
 }
 ```
 
-### aiaPolicies[] entry format (from Pass 3)
-```js
-{
-  policyNo, insured, code,
-  name,          // plan name e.g. "A-LifeLink"
-  status,        // e.g. "In Force - Premium Paying"
-  sumAssured,    // e.g. "RM 54,500.00"
-  annualPremium  // e.g. "RM 2,400.00"
-}
+## To-do mode flow (all modules)
+```
+renderStatusStep → completedSteps.includes(n)?
+  YES → green checked (click → handleStepClick → uncheck)
+  NO  → click → openSetStatusWithDate → confirmSetStatusWithDate
+            → toggleStepDone()         // NOT setStatus()
+            → checkStepAutoReminder()  // if step.autoReminder
+            → currentStatus = max(completedSteps)
+Recruitment: after step 3 renderConsiderChoices → handleConsiderChoice → toggleStepDone;
+  step 5 (Agreed) → checkAutoTransfer creates onboarding case; step 6 (KIV) → reactivateFromKIV.
+Snapwill: renderCaseDetail({...c, category:'snapwill'}, contact) so multi-category shows Snapwill steps.
 ```
 
----
-
-## To-Do Mode Flow (ALL modules)
-
+## Security layer
 ```
-renderStatusStep(c, stepDef, options)
-  completedSteps.includes(stepDef.n)?
-    YES → green checked (click to uncheck via handleStepClick)
-    NO  → checkbox → handleStepClick → openSetStatusWithDate
-              → confirmSetStatusWithDate(caseId, stepN)
-                  → toggleStepDone()        ← NOT setStatus()
-                  → checkStepAutoReminder() ← fires if step.autoReminder defined
-                  → currentStatus = Math.max(...completedSteps)
+hashPassword(pwd) → 'sha256:' + hex (SubtleCrypto). verifyPassword handles sha256: + legacy plaintext.
+Brute-force: localStorage['lp_lockout'] = {count, username, until}; 5 fails → 15 min.
+Auto-logout: 30 min inactivity → localLogout()/gauthSignOut(); start/stopAutoLogout().
+saveUser() and localLogin() are async (await hashing).
 ```
 
-**Recruitment special flow:**
-- After step 3: `renderConsiderChoices` → `handleConsiderChoice` → `toggleStepDone`
-- Step 5 (Agreed): auto-creates onboarding case via `checkAutoTransfer`
-- Step 6 (KIV): `reactivateFromKIV` removes step 6 from completedSteps
-
----
-
-## Auto-Sync Architecture
-
+## Multi-category cases
 ```
-saveDB()
-  → localStorage write
-  → gdScheduleSave()           (Google Drive backup)
-  → syncLocalToSheets()        (Google Sheets push — if GAUTH.accessToken active)
-
-onLocalAuthReady() [local login]
-  → gauthInit() always on DOMContentLoaded
-  → restores token from localStorage silently
-  → 2s delay → pullTeamDataFromSheets() + startSheetsSync()
-
-Google token: localStorage (persistent) + sessionStorage (fast)
-Cleared on: gauthSignOut() clears both
+category = primary (drives status steps); categories[] = all (drives which pages show it).
+getCases('snapwill') → c.category==='snapwill' OR c.categories.includes('snapwill').
 ```
 
-**⚠️ REQUIRED:** Enable Google Sheets API in project `638079686621` (gen-lang-client)
-URL: https://console.cloud.google.com/apis/library/sheets.googleapis.com?project=638079686621
-
----
-
-## Known Bugs (Pending Fix)
-
-### Bug #1 — Snapwill shows Claims progress
-- File: `snapwill.js`, function `openSnapwillCase()`, line ~55
-- Cause: `renderCaseDetail(c, contact)` uses `c.category` = `'claims'` for multi-category cases
-- Fix: `let body = renderCaseDetail({...c, category:'snapwill'}, contact);`
-
-### Bug #2 — Label shows random ID prefix
-- File: `sales.js`, function `renderNewCaseForm()`, line ~130
-- Cause: Radio button shows `${l.id} — ${l.label}` where `l.id` is a UID like `mpye0qpq...`
-- Fix: Change to `${l.label}` only in the display text
-
----
-
-## ALPP Scraper — Current State
-
-| Pass | Status |
-|---|---|
-| Pass 1 (ILP, ~200 policies) | ✅ COMPLETE — 74 contacts created |
-| Pass 2 (traditional, 93 policies) | ✅ COMPLETE — scraped via Chrome MCP |
-| Targeted (51 name-only contacts) | ✅ COMPLETE — enriched via processALPPEnrichment() |
-| **Pass 3 (plan details)** | 🟡 IN PROGRESS — ~6/199 done |
-
-**CRM current:** 140 contacts · 131 with phone · 129 with IC · 131 with occupation
-
-### Pass 3 Scraper Critical Info
-- Script: `alpp_scraper_pass3.js` (paste into Chrome DevTools Console on ALPP detail page)
-- Chrome MCP: inject via `javascript_tool` using `window._step` pattern
-- ALPP now uses new Angular portal: `alpp_v2/pos/#/policy-enquiry-one-glance`
-- Policy detail page URL: navigate to Portal → Policy Status Enquiry → search by Policy Number → click result
-- Search form: `#ContentPlaceHolder1_txtPolNo` input + `#ContentPlaceHolder1_btnEditSearch` button ✅ confirmed working
-- State saved in `localStorage['alpp_p3']` — resumable after interruption
-- Import: CRM → 🔄 ALPP Enrich → select JSON → auto-detected as Pass 3 data
-
-### Pass 3 Extraction (confirmed working regex)
-```js
-// Captures: code, planName, status, sumAssured, annualPremium
-/([A-Z]{2,4}\d)\s+([\w\s\-\/\.&]+?)\s*[\n\r]+\s*\(([^)]+)\)[\s\S]*?(\d{1,3}(?:,\d{3})*\.\d{2})\t(\d{1,3}(?:,\d{3})*\.\d{2})/g
-
-// Policy status
-/Policy Status\s+(IN FORCE[^\n\r]*|LAPSED[^\n\r]*|...)/i
-
-// Commencement date
-/Effective\s+Dt\s*:\s*(\d{1,2}\s+\w+\s+\d{4})/i
+## Timing-sensitive init
+```
+Script order: data.js → utils.js → sounds.js → [page modules incl. crm.js, ai.js] → reminders.js → app.js
+loadDB() at bottom of data.js. updateSoundBtn() in localLogin() ONLY (sounds.js not ready in loadDB).
+gauthInit() always on DOMContentLoaded (not gated on local session).
 ```
 
-### Pick main plan = highest annual premium:
-```js
-const nonZero = allPlans.filter(x => x.annualPremium !== 'RM 0.00');
-const mainPlan = nonZero[0] || allPlans[0];
+## Tool notes (not app bugs)
+- `preview_screenshot` hangs on `backdrop-filter` → use `preview_snapshot`.
+- Editing the Apps Script via Chrome MCP: a sticky "signed in as…" Google popup blocks Deploy; dismiss its OK button (sometimes via JS click) and dispatch Ctrl+S as a real keydown to save before deploying.
+- Chrome MCP tab group is separate from the user's Chrome — `select_browser` + `tabs_context_mcp` before tab actions.
+
+## Identity merge (current)
+```
+currentUserEmail() in data.js = GAUTH.currentUser?.email || LOCAL_AUTH.currentUser?.email || ''.
+Used for ownerEmail (createContact/Case/Reminder) + Sheets ownership/pull filter (sheets.js).
+admin.email = chongwei1986@gmail.com → local admin login and Google login share one owner = one dataset.
 ```
 
-### Session watchdog (auto-extend ALPP session):
-```js
-setInterval(() => {
-  const b = [...document.querySelectorAll('button,a')]
-    .find(b => /extend|continue|stay/i.test(b.textContent));
-  if (b) b.click();
-}, 30000);
+## Will Referral Network (referrals.js)
+```
+Each will-named person → createContact({referredBy: ownerContactId, referralRole, referralStatus,
+  referralType:'snapwill', referralCaseId, referralRelationship}). The referredBy chain = the tree.
+Roles: executor, replacement_executor, beneficiary, guardian, replacement_guardian, witness, other.
+Status: named→contacted→appointment→client→declined.
+Capture: renderWillReferralSection(caseId, ownerContactId) injected into openSnapwillCase (snapwill.js).
+Page 'referrals' (renderReferralNetwork): tree (renderTreeNode recursion) | 3D (3d-force-graph CDN, load3DNetwork) | by-role.
+getDirectReferrals/getReferralsForCase/countDownline/getAllReferrals helpers.
 ```
 
----
-
-## Timing-Sensitive Initializations
-
+## Telegram OTP 2FA
 ```
-loadDB()          → runs at bottom of data.js
-updateSoundBtn()  → localLogin() in app.js ONLY (not loadDB — sounds.js not loaded yet)
-gauthInit()       → always runs on DOMContentLoaded (not gated on local session)
-Script load order: data.js → utils.js → sounds.js → [page modules] → app.js
+Toggle: Admin Panel → Login Security → DB.settings.twoFactor = 'telegram' | 'off' (default off).
+localLogin(): password ok → if twoFactor==='telegram' → startOtpChallenge(user); else completeLocalLogin(user).
+OTP overlay (#otpOverlay) built in app.js: startOtpChallenge → showOtpScreen → verifyOtp → completeLocalLogin.
+Proxy (telegram_bot.gs): {otp:'send'} → handleOtpSend (6-digit in CacheService 'otp_'+nonce 300s, sendMessage to ALLOWED_CHAT_ID, returns nonce); {otp:'verify',nonce,code} → handleOtpVerify.
+Caveat: gate is client-side (static site) — code is server-verified but the step is bypassable by editing JS. Good-enough, not bank-grade.
 ```
 
----
-
-## Tool Notes (not app bugs)
-
-- `preview_screenshot` hangs on `backdrop-filter` — use `preview_snapshot`
-- Chrome MCP tab group is separate from user's Chrome tabs — use `select_browser('9752ede8...')` to connect
-- After Chrome MCP reconnects: always call `tabs_context_mcp` + `select_browser` before any tab action
-- ALPP `alpp_p3` localStorage key = Pass 3 scraper state
+## Open items (see SESSION_SUMMARY for detail)
+- Redeploy Apps Script to activate AI proxy; roll the Groq key (shown in chat).
+- Decide on ALPP live sync (no public API; scraper→import only).
+- Verify legacy Snapwill-steps and label-UID bugs.

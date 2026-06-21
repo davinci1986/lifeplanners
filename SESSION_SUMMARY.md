@@ -1,59 +1,51 @@
-# SESSION_SUMMARY.md — LifePlanner Pro
-**Date:** 2026-06-06
+# SESSION_SUMMARY — LifePlanner Pro
+**Current state as of 2026-06-21.** (Not a history log — this reflects where the project stands now.)
 
 ---
 
-## Completed This Session
-
-### 1. Security Enhancements (`js/app.js`, `js/gauth.js`)
-- **SHA-256 password hashing** — SubtleCrypto (browser-native). Stored as `sha256:hex`. Auto-upgrades plaintext on first login.
-- **Brute-force lockout** — 5 failed attempts → 15 min lock. Counter in `localStorage['lp_lockout']`. Shows remaining attempts.
-- **Auto-logout** — 30 min inactivity. Resets on any mouse/key/touch event. Works for both local + Google login.
-- **Google login resilience** — `onAuthReady()` now wraps Sheets calls in try/catch. Still logs in if Sheets API not enabled (shows warning toast instead of failing silently).
-- **Role label fix** — `gauth.js` `getRoleLabel()` now handles both `dm`/`um` (local) and `district_manager`/`unit_manager` (Sheets).
-
-### 2. ALPP Pass 3 — Plan Detail Scraper
-- **`alpp_scraper_pass3.js`** — new scraper. Captures: plan name, sum assured, annual premium, total premium, policy status, commencement date for all ~199 unique policies.
-- **`processALPPPass3()`** in `crm.js` — imports Pass 3 JSON. Groups by owner, adds `aiaPolicies[]` to contact. Auto-detects Pass 3 data on import (checks for `planName` field).
-- **Contact detail view** — new "AIA Policies" table section shown when `aiaPolicies[]` is populated.
-- **`aiaPolicies[]`** added to `createContact` defaults in `data.js`.
-- **Portal discovery** — ALPP upgraded to new Angular portal (`alpp_v2/pos/`). Scrapers still work: `#ContentPlaceHolder1_txtPolNo` + `#ContentPlaceHolder1_btnEditSearch` exist on detail page.
-- **Extraction regex confirmed working:**
-  ```js
-  /([A-Z]{2,4}\d)\s+([\w\s\-\/\.&]+?)\s*[\n\r]+\s*\(([^)]+)\)[\s\S]*?(\d{1,3}(?:,\d{3})*\.\d{2})\t(\d{1,3}(?:,\d{3})*\.\d{2})/g
-  ```
-  Captures: plan code, plan name, status, sum assured, annual premium per plan.
-
-### 3. Pass 3 Scraper — In Progress
-- Injected `window._step` scraper into Chrome MCP tab (34068521)
-- ~6/199 policies scraped before session interrupted
-- State saved in `localStorage['alpp_p3']` on ALPP domain
-- Partial downloads every 25 policies; final download auto on completion
+## Where the project is
+In production at https://davinci1986.github.io/lifeplanners/, ~98% complete. Recent work delivered: multi-device sync fix, CRM usability overhaul, Telegram bot, and an AI Assistant (Groq, free).
 
 ---
 
-## Bugs Identified (NOT YET FIXED)
+## Recently completed & live
+1. **Multi-device sync** (`sheets.js`, `gauth.js`, `app.js`)
+   - All devices open one shared Sheet: `DEFAULT_SHARED_SHEET_ID = '1yqD5ypEvsRjPim3iAnyMFmNRQPIjFfwAc9MacHZHGYE'`.
+   - `pullMyDataFromSheets()` — pulls the logged-in user's own contacts/cases/reminders on **any role** (agents no longer blocked). `mergeMyRows()` merges by-owner + legacy rows, newest-by-timestamp wins.
+   - Login flow now: `await pullMyDataFromSheets()` → `pullTeamDataFromSheets()` → `startSheetsSync()` (pull-first, then push). Fixes "contacts missing on other device".
 
-### Bug #1 — Snapwill shows Claims progress steps
-- **Where:** `snapwill.js` `openSnapwillCase()` line 55
-- **Cause:** `renderCaseDetail(c, contact)` uses `c.category` = `'claims'`. Multi-category cases (claims+snapwill) show Claims steps in Snapwill view.
-- **Fix:** Pass `{...c, category:'snapwill'}` to `renderCaseDetail` in `openSnapwillCase`.
+2. **CRM UX overhaul** (`crm.js`)
+   - Debounced search `crmSearchInput()` (180 ms) → `renderCRMList()` repaints only the list, not the whole page.
+   - Sort dropdown (`crmSort`: name / newest / birthday). Per-row 📱 WhatsApp + 📞 call buttons.
+   - **Follow-ups tab**: due reminders + stale cases (`CRM_STALE_DAYS = 14`, `getStaleCasesList()`) + upcoming birthdays, with one-tap WhatsApp. `getFollowUpCount()` feeds the tab badge.
 
-### Bug #2 — Label picker shows random ID prefix
-- **Where:** `sales.js` `renderNewCaseForm()` ~line 130
-- **Cause:** Radio button label text is `${l.id} — ${l.label}`. IDs are UIDs like `mpye0qpqscm0n`.
-- **Fix:** Change display to just `${l.label}`.
+3. **Telegram bot** (`telegram_bot.gs`, Google Apps Script — deployed & live)
+   - Webhook `doPost(e)`; commands `/due /reminders /kiv /summary /search /overdue /priority /debug /help`. Dedupe via CacheService. Chat-restricted to Keith's chat ID.
+
+4. **AI Assistant** (`js/ai.js` + `telegram_bot.gs` `handleAIProxy()`) — **Groq, free, LIVE**
+   - Sidebar page "AI Assistant" (AI badge). Chat over live CRM data, ✍️ WhatsApp drafting (EN/BM/Chinese), 📋 client briefs, 🎯/🔥/📊 quick prompts.
+   - Browser → Apps Script proxy (`?ai=true` POST, text/plain to avoid CORS preflight) → Groq `llama-3.3-70b-versatile`. Key hidden server-side (`GROQ_API_KEY`).
+   - Apps Script **deployed (Version 6)** and smoke-tested live (Groq replied through the proxy).
+
+5. **Account merge** (`data.js` `currentUserEmail()`, `sheets.js`) — local **admin** and Google account resolve to one email (`chongwei1986@gmail.com`) for data ownership + Sheets sync, so both logins share one dataset.
+
+6. **Will Referral Network** (`js/referrals.js`, page `referrals`) — capture people named in a will (executor/replacement, beneficiary, guardian/replacement, witnesses, other) per Snapwill case; each becomes a CRM contact with `referredBy` = will owner. Views: genealogy **tree**, **dashboard** (status pipeline + conversion + top referrers), **3D network** (3d-force-graph CDN). Status pipeline: Named→Contacted→Appointment→Client→Not interested.
+
+7. **Telegram OTP 2FA** (`app.js`, `telegram_bot.gs` `handleOtpSend/Verify`) — admin toggle (Admin Panel → Login Security, default OFF). After password, a server-generated 6-digit code (CacheService, 5-min) is sent to Telegram and verified server-side. Live & tested.
 
 ---
 
-## Pending Next Session
-
+## Open tasks
 | Priority | Task |
 |---|---|
-| 🔴 Fix now | Bug #1: Snapwill progress (snapwill.js line 55) |
-| 🔴 Fix now | Bug #2: Label ID prefix (sales.js ~line 130) |
-| 🔴 Keith action | Enable Sheets API: [console.cloud.google.com](https://console.cloud.google.com/apis/library/sheets.googleapis.com?project=638079686621) |
-| 🟡 Resume | ALPP Pass 3 scraping — restart `window._step` in ALPP tab, inject from `alpp_scraper_pass3.js` |
-| 🟡 Build | Team Dashboard: hierarchy tree + per-agent stats (`dashboard.js`) |
-| 🟡 Build | Pipeline charts: bar chart + conversion rate (`dashboard.js`) |
-| 🟢 Later | Security: DB encryption, auto-logout on Google session expiry |
+| 🔴 Security | Keith to **roll the Groq key** (shown in chat): console.groq.com/keys → delete → create new → paste on line 5 of Apps Script → save → redeploy (Deploy → Manage deployments → ✏️ → New version → Deploy). |
+| 🟡 Decide | **ALPP live sync** — Keith asked whether the app can link to the AIA Life Planner Portal. No public API; only viable path is the existing scraper → JSON import, ideally packaged as a **one-click bookmarklet** (Tier A download+import, or Tier B post straight to the Sheet). Awaiting go-ahead. See `ARCHIVE.md`. |
+| 🟢 Verify | Confirm two legacy bugs are resolved (Snapwill progress steps; label UID prefix) — see PROJECT_HANDOFF "Known issues to verify". |
+| 🟢 Later | Team dashboard hierarchy + pipeline charts (`dashboard.js`). |
+
+---
+
+## Apps Script (shared web app — Telegram bot + AI proxy)
+- Project: `https://script.google.com/home/projects/1rUsWl7UOZ-Xj1FFKs_s1mpsmKhc7EdrJmzODhThldiTAfEnDbFNmH2nX/edit`
+- Exec URL (used by `js/ai.js` `AI_PROXY_URL_DEFAULT`): `.../macros/s/AKfycbyrmVRrjfjRRsg9rBS0RxbRbG2AwkwsjQOE27dFvy1GgB0A_Vzi4PzsvRUosHBapPKq/exec`
+- Constants in the deployed editor: `BOT_TOKEN`, `ALLOWED_CHAT_ID`, `SPREADSHEET_ID`, `GROQ_API_KEY`. (Local `telegram_bot.gs` keeps these blank.)

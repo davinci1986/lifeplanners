@@ -1,214 +1,133 @@
-# ARCHITECTURE.md — LifePlanner Pro
+# ARCHITECTURE — LifePlanner Pro
 
-## High-Level Architecture
+Current as of 2026-06-21. No server, no backend, no build step.
 
+## File map
 ```
-Browser (Single Page Application)
-│
-├── index.html              ← Shell: sidebar, modals, topbar, all <script> tags
-├── css/app.css             ← Glass design system + all components
-├── alpp_scraper.js         ← Pass 1: ILP policies — COMPLETE
-├── alpp_scraper_pass2.js   ← Pass 2: traditional policies — COMPLETE
-├── alpp_scraper_pass3.js   ← Pass 3: plan details (name/SA/premium) — IN PROGRESS
+Browser (Single Page App)
+├── index.html              ← Shell: sidebar nav, modals, topbar, all <script> tags
+├── css/app.css             ← Glass design system + components
+├── alpp_scraper*.js        ← ALPP enrichment scrapers (paused — see ARCHIVE.md)
+├── telegram_bot.gs         ← Google Apps Script web app: Telegram bot + AI (Groq) proxy
 └── js/
-    ├── data.js             ← DB layer: localStorage CRUD, saveDB, status defs, security helpers
-    ├── app.js              ← Router, page orchestration, local login, security (hash/lockout/auto-logout)
+    ├── data.js             ← DB layer: localStorage CRUD, saveDB, status defs, security helpers; loadDB() at end
+    ├── app.js              ← Router (PAGE_MAP), login, security (hash/lockout/auto-logout), sync wiring
     ├── utils.js            ← Toast, modals, IC/DOB helpers, renderStatusStep, handleStepClick
-    ├── sounds.js           ← 12 Web Audio API sounds + toggle
-    ├── crm.js              ← CRM contacts, Bulk WhatsApp, Excel/ALPP import, processALPPPass3()
-    ├── sales.js            ← Sales cases + shared renderCaseDetail (claims/servicing share this)
-    ├── claims.js           ← Claims (to-do mode ✅)
-    ├── servicing.js        ← Servicing (to-do mode ✅)
-    ├── recruitment.js      ← Recruitment (to-do mode ✅, own renderRecruitDetail)
-    ├── onboarding.js       ← Onboarding (to-do mode ✅)
-    ├── snapwill.js         ← Snapwill digital will cases
-    ├── aisolution.js       ← AI Solution custom cases
-    ├── others.js           ← Custom category cases
-    ├── export.js           ← Excel export (SheetJS, 6 sheets)
-    ├── dashboard.js        ← Dashboard overview (charts: PENDING)
+    ├── sounds.js           ← Web Audio sounds + toggle
+    ├── crm.js              ← CRM, debounced search, sort, Follow-ups tab, Bulk WhatsApp, Excel/ALPP import
+    ├── referrals.js        ← Will Referral Network (MLM downline): capture, genealogy tree, dashboard, 3D
+    ├── ai.js               ← AI Assistant: proxy call, CRM context, chat, WhatsApp/brief generators
+    ├── sales.js            ← Sales + shared renderCaseDetail (claims/servicing reuse it)
+    ├── claims.js / servicing.js / onboarding.js   ← to-do mode modules
+    ├── recruitment.js      ← to-do mode + own renderRecruitDetail (branch UI)
+    ├── snapwill.js / aisolution.js / others.js    ← category modules
+    ├── export.js           ← Excel export (SheetJS)
+    ├── dashboard.js        ← Dashboard overview (team/charts: later)
     ├── reminders.js        ← Reminders page
     ├── whatsapp.js         ← WhatsApp script generator
-    ├── gauth.js            ← Google OAuth + token persistence + auto-logout hook
-    ├── gdrive.js           ← Google Drive backup/sync
-    └── sheets.js           ← Google Sheets auto-sync (push + pull)
+    ├── gauth.js            ← Google OAuth + token persistence + login pull/sync hooks
+    ├── gdrive.js           ← Google Drive backup
+    └── sheets.js           ← Google Sheets sync: shared sheet, pullMyDataFromSheets, mergeMyRows, push
 
-localStorage['lifeplanner_v1']  ← Persistent JSON (single source of truth per device)
-Google Sheets                   ← Cross-device sync (auto-push on saveDB, auto-pull on login)
-Google Drive                    ← Backup (gdScheduleSave on saveDB)
-GitHub Pages                    ← Static hosting
+localStorage['lifeplanner_v1']  ← per-device source of truth
+Google Sheets (shared)          ← cross-device sync (pull on login, push on saveDB)
+Google Drive                    ← backup
+Google Apps Script web app      ← Telegram bot + AI proxy (hides Groq key)
+GitHub Pages                    ← static hosting
 ```
 
-**No server. No backend. No build step.**
-
----
-
-## Application Startup Flow
-
+## Startup flow
 ```
-Page Load → index.html loads all <script> tags in order:
-  data.js    → loadDB() reads localStorage into DB
-  gauth.js   → loaded (client setup deferred to DOMContentLoaded)
-  app.js     → DOMContentLoaded:
-                 gauthInit() — ALWAYS runs (restores Google token from localStorage)
-                 localAuthInit() — checks sessionStorage for saved session
-                   found → onLocalAuthReady() → navigateTo('dashboard')
-                            → startAutoLogout()
-                            → 2s delay → pullTeamDataFromSheets() if token active
-                   not found → showLoginScreen()
+index.html loads scripts in order: data.js → utils.js → sounds.js → [page modules incl. crm.js, ai.js]
+  → reminders.js → app.js
+data.js: loadDB() reads localStorage into DB.
+app.js DOMContentLoaded:
+  gauthInit() — always (restores Google token from localStorage)
+  localAuthInit() — sessionStorage session?
+    yes → onLocalAuthReady() → navigateTo('dashboard') → startAutoLogout()
+           → await pullMyDataFromSheets() → pullTeamDataFromSheets() → startSheetsSync()
+    no  → showLoginScreen()
 ```
 
----
-
-## Security Architecture
-
+## Sync flow
 ```
-Passwords: SHA-256 via SubtleCrypto (browser-native, no library)
-  Format: 'sha256:' + hexdigest
-  Migration: plaintext auto-upgraded on successful login
+saveDB() → localStorage + gdScheduleSave() (Drive, debounced) + syncLocalToSheets() (Sheets push, if token)
 
-Brute-force: localStorage['lp_lockout'] = { count, username, until }
-  5 failures → 15 min lockout (Date.now() + 15*60*1000)
-  Clears on successful login
-
-Auto-logout: 30 min inactivity
-  Events watched: mousemove, keydown, click, touchstart
-  Timer reset on any activity
-  On timeout: localLogout() or gauthSignOut()
-
-Functions: hashPassword(), verifyPassword(), startAutoLogout(), stopAutoLogout()
-  localLogin() and saveUser() are async (await hashPassword)
+Login (local or Google):
+  pullMyDataFromSheets()   // owner-filtered, ALL roles; rebuilds device from the shared sheet
+  pullTeamDataFromSheets() // managers' team view
+  startSheetsSync()        // begin push-on-save
+Shared sheet: DEFAULT_SHARED_SHEET_ID (sheets.js); a device with no stored ID opens it (no duplicate).
+mergeMyRows(): keep my-owned + legacy(no-owner) rows; newest updatedAt wins.
+Google token: localStorage (persistent) + sessionStorage (fast); cleared on gauthSignOut().
 ```
 
----
-
-## Auto-Sync Flow
-
+## AI Assistant + Telegram bot (Apps Script)
 ```
-saveDB()
-  → localStorage.setItem(DB_KEY, JSON.stringify(DB))
-  → gdScheduleSave()           ← Google Drive backup (debounced)
-  → syncLocalToSheets()        ← Google Sheets push (only if GAUTH.accessToken)
-
-Google token lifecycle:
-  First login: gauthSignIn() → Google OAuth popup → saved to sessionStorage + localStorage
-  Subsequent loads: gauthInit() reads localStorage → restores silently
-  Expiry (~1hr): Google prompts re-auth
-  Sign out: clears both stores + stopAutoLogout()
-
-onAuthReady() (Google login success):
-  → sheetsEnsureSpreadsheet()  [wrapped in try/catch — fails gracefully if API not enabled]
-  → loadCurrentUserRole()      [wrapped in try/catch — defaults to 'agent']
-  → hideLoginScreen() → render app → startAutoLogout()
+Browser (js/ai.js) → fetch exec URL, POST text/plain {ai:true, system, messages, max_tokens}
+  (text/plain avoids CORS preflight)
+Apps Script doPost(e):
+  update.ai === true → handleAIProxy() → Groq /openai/v1/chat/completions
+                       (model llama-3.3-70b-versatile, Bearer GROQ_API_KEY) → {ok,text} JSON
+  else → Telegram command routing (/due /kiv /summary /search /overdue /priority …)
+buildCRMContext() (ai.js): privacy-safe digest — no NRIC, no full phone.
+Any Apps Script change requires a manual redeploy (Deploy → Manage deployments → New version).
 ```
 
----
-
-## Page Render Flow
-
+## Identity (merge)
 ```
-navigateTo('crm') → renderCRM() → getElementById('content').innerHTML = html
-```
-All pages: **render fn → innerHTML injection → inline onclick handlers**
-
----
-
-## To-Do Mode Flow (ALL case modules)
-
-```
-renderStatusStep(c, stepDef, options)
-  completedSteps.includes(stepDef.n)?
-    YES → green checked (click → handleStepClick → uncheck immediately)
-    NO  → click → handleStepClick → openSetStatusWithDate
-              → confirmSetStatusWithDate(caseId, stepN)
-                  → toggleStepDone()          ← NOT setStatus()
-                  → checkStepAutoReminder()   ← fires if step.autoReminder defined
-                  → currentStatus = max(completedSteps)
+currentUserEmail() (data.js) = GAUTH.currentUser?.email || LOCAL_AUTH.currentUser?.email || ''.
+Used for record ownerEmail (data.js create*) and Sheets ownership/pull filter (sheets.js).
+admin's email is chongwei1986@gmail.com → local admin + Google login = one owner = shared data.
 ```
 
-- Claims + Servicing: share `renderCaseDetail` from `sales.js`
-- Recruitment: own `renderRecruitDetail` with branch choice UI
-- **Snapwill**: calls `renderCaseDetail({...c, category:'snapwill'}, contact)` ← override needed (bug fix)
-
----
-
-## Multi-Category Cases
-
-Cases can belong to multiple categories (e.g. Claims + Snapwill):
-```js
-{
-  category: 'claims',              // primary category — drives status steps
-  categories: ['claims','snapwill'] // all categories — determines which pages show it
-}
+## Security
+```
+Passwords: SHA-256 via SubtleCrypto, 'sha256:'+hex; plaintext auto-upgrades on login.
+Brute-force: localStorage['lp_lockout'] {count,username,until}; 5 fails → 15 min.
+Auto-logout: 30 min inactivity (mousemove/keydown/click/touchstart) → localLogout()/gauthSignOut().
+localLogin() and saveUser() are async.
+2FA (Telegram OTP): DB.settings.twoFactor='telegram' (Admin Panel toggle, default off).
+  localLogin() → after password ok → startOtpChallenge() → fetch proxy {otp:'send'} →
+  showOtpScreen overlay → verifyOtp() {otp:'verify',nonce,code} → completeLocalLogin(user).
+  Apps Script handleOtpSend/Verify: 6-digit code in CacheService 'otp_'+nonce (300s), sent to ALLOWED_CHAT_ID.
 ```
 
-`getCases('snapwill')` returns cases where `c.category === 'snapwill'` OR `c.categories.includes('snapwill')`.
-
-**Known issue:** When viewing a multi-category case from the Snapwill page, `renderCaseDetail` uses `c.category` (primary = 'claims'), so shows Claims steps. Fix: `renderCaseDetail({...c, category:'snapwill'}, contact)` in `openSnapwillCase()`.
-
----
-
-## Component Structure
-
+## Render + to-do flow
 ```
-index.html
-├── #sidebar          ← Static nav
-├── #mainWrapper
-│   ├── .topbar       ← Search, sound toggle, reminders bell
-│   └── #content      ← All page content injected here
-├── #caseModal        ← Case detail/edit
-├── #contactModal     ← Contact detail/form/ALPP import preview
-├── #confirmModal     ← Yes/no dialog
-└── #crmImportInput   ← Hidden file input — Excel (.xlsx/.csv) AND JSON (ALPP enrichment)
+navigateTo('crm') → renderCRM() → #content.innerHTML = html (inline onclick handlers).
+CRM list-only repaint: renderCRMList() updates #crmListArea + #crmCount (used by debounced search & sort).
+
+renderStatusStep → completedSteps.includes(n)?
+  YES → green checked (click → handleStepClick → uncheck)
+  NO  → click → openSetStatusWithDate → confirmSetStatusWithDate
+            → toggleStepDone()  (NOT setStatus()) → checkStepAutoReminder()
+            → currentStatus = max(completedSteps)
+Claims+Servicing share renderCaseDetail (sales.js); Recruitment has its own branch UI;
+Snapwill must pass {...c, category:'snapwill'} to renderCaseDetail.
 ```
 
----
+## Multi-category cases
+```
+category = primary (drives steps); categories[] = all (drives page membership).
+getCases('snapwill') → c.category==='snapwill' OR c.categories.includes('snapwill').
+```
 
-## Design Patterns
+## Components (index.html)
+```
+#sidebar (static nav, incl. AI Assistant item) · #mainWrapper(.topbar + #content)
+#caseModal · #contactModal (also AI WhatsApp/brief tools) · #confirmModal · #crmImportInput (xlsx/csv/JSON)
+```
 
+## Design patterns
 | Pattern | Usage |
 |---|---|
-| innerHTML injection | All UI as template literal strings |
+| innerHTML injection | UI as template literal strings |
 | Inline onclick | `onclick="fn('${escHtml(id)}')"` |
-| DB singleton | `DB` in memory; `saveDB()` persists to localStorage |
-| escHtml() | All user content escaped before injection |
-| var(--glass) | All card/modal backgrounds — never hardcoded rgba() |
+| DB singleton | `DB` in memory; `saveDB()` persists + syncs |
+| escHtml() | all user content escaped |
+| var(--glass) | all card/modal backgrounds |
 
-**`backdrop-filter` causes headless renderer hangs** — always use `preview_snapshot`
+`backdrop-filter` hangs headless renderers — use `preview_snapshot`.
 
----
-
-## ALPP Integration
-
-### Pass 1 + 2 — Personal enrichment
-```
-processALPPEnrichment(records)   ← crm.js
-  Input: [{policyNo, owner, phone, email, nric, dob, gender, nationality, occupation, employer}]
-  → match by owner name (case-insensitive)
-  → fill EMPTY fields only (never overwrite)
-  → saveDB()
-```
-
-### Pass 3 — Plan details (NEW)
-```
-processALPPPass3(records)        ← crm.js
-  Input: [{policyNo, owner, insured, planName, sumAssured, annualPremium, policyStatus, commencedDate, allPlans[], _pass:3}]
-  → group by owner name
-  → add/merge aiaPolicies[] on contact (no duplicates)
-  → add 'AIA' to existingInsurance[] if not present
-  → saveDB()
-
-Auto-detection: enrichFromALPPFile() checks arr[0]._pass === 3 || 'planName' in arr[0]
-```
-
-### ALPP Scraper Pattern (Chrome MCP injection)
-```js
-// window._step self-scheduling (survives Angular route changes)
-window._step = function() {
-  // fill #ContentPlaceHolder1_txtPolNo
-  // click #ContentPlaceHolder1_btnEditSearch
-  // wait for plan table: /[A-Z]{2,4}\d\s+[\w][\w\s\-]+\n/ in innerText
-  // extract with regex (confirmed working on new alpp_v2/pos/ portal)
-  // save to localStorage['alpp_p3']
-  // setTimeout(window._step, 3000)
-}
-```
+ALPP scraper internals are in `ARCHIVE.md` (paused).
