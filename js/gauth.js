@@ -248,6 +248,8 @@ function updateAuthUI() {
         <div style="font-size:10px;color:rgba(255,255,255,0.5)">${getRoleLabel(user.role)}</div>
       </div>`;
   }
+  // Role-based nav visibility (Google login path — navigateTo() handles local login)
+  if (typeof updateRoleNav === 'function') updateRoleNav();
 }
 
 function getRoleLabel(role) {

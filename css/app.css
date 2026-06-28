@@ -99,11 +99,20 @@ body {
   flex-direction: column;
   flex-shrink: 0;
   transition: width var(--transition);
-  overflow: hidden;
+  /* scroll vertically when items overflow (phone + desktop); keep horizontal
+     clipping so collapsed-mode labels stay hidden */
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   position: fixed;
   left: 0; top: 0; bottom: 0;
   z-index: 100;
 }
+/* slim scrollbar for the sidebar */
+.sidebar::-webkit-scrollbar { width: 6px; }
+.sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+.sidebar::-webkit-scrollbar-track { background: transparent; }
 
 .sidebar.collapsed { width: var(--sidebar-collapsed); }
 .sidebar.collapsed .logo-text,

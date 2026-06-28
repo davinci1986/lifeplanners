@@ -7,6 +7,15 @@ let currentPage = 'dashboard';
 // Local auth state — must be declared early so navigateTo can reference it
 const LOCAL_AUTH = { currentUser: null };
 
+// Show/hide role-based nav items for whoever is logged in (local OR Google).
+function updateRoleNav() {
+  const role = LOCAL_AUTH.currentUser?.role || GAUTH.currentUser?.role;
+  const teamNav = document.getElementById('nav-team');
+  if (teamNav) teamNav.style.display = (role && role !== 'agent') ? 'flex' : 'none';
+  const adminNav = document.getElementById('nav-admin');
+  if (adminNav) adminNav.style.display = (role === 'admin') ? 'flex' : 'none';
+}
+
 const PAGE_MAP = {
   dashboard:   { render: renderDashboard,       title: 'Dashboard' },
   admin:       { render: renderAdminPanel,      title: 'Admin Panel' },
@@ -41,11 +50,7 @@ function navigateTo(page) {
   document.getElementById('globalSearch').value = '';
 
   // Show/hide role-based nav items
-  const role = LOCAL_AUTH.currentUser?.role || GAUTH.currentUser?.role;
-  const teamNav = document.getElementById('nav-team');
-  if (teamNav) teamNav.style.display = (role && role !== 'agent') ? 'flex' : 'none';
-  const adminNav = document.getElementById('nav-admin');
-  if (adminNav) adminNav.style.display = (role === 'admin') ? 'flex' : 'none';
+  updateRoleNav();
 
   p.render();
   updateBadges();
