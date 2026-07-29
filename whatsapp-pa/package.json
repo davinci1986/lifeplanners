@@ -1,0 +1,18 @@
+{
+  "name": "lifeplanner-whatsapp-pa",
+  "version": "1.0.0",
+  "description": "JARVIS — 24/7 WhatsApp personal assistant: monitors incoming WhatsApp messages, notifies via Telegram with AI reply suggestions, one-tap send.",
+  "main": "index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.9",
+    "pino": "^9.5.0",
+    "qrcode": "^1.5.4"
+  }
+}
