@@ -180,8 +180,9 @@ function clientRecordText(client) {
   if (client.cases?.length) {
     lines.push('Open cases with us:');
     client.cases.forEach((c) => {
+      const status = c.statusLabel || (c.status ? `step ${c.status}` : '');
       lines.push(
-        `  - ${c.category || ''}${c.label ? ' / ' + c.label : ''}${c.status ? ` — status: ${c.status}` : ''}${c.nextStep ? ` — next step: ${c.nextStep}` : ''}`
+        `  - ${c.category || ''}${c.label ? ' / ' + c.label : ''}${status ? ` — progress: ${status}` : ''}${c.nextStep ? ` — next step: ${c.nextStep}` : ''}`
       );
     });
   }

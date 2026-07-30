@@ -10,7 +10,7 @@ const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
 const SHEET_DEFS = {
   Users:       ['email','name','role','manager_email','agent_code','status','created_at'],
   Contacts:    ['id','owner_email','name','phone','email_addr','nric','dob','occupation','notes','tags','created_at','updated_at','profile_json'],
-  Cases:       ['id','owner_email','contact_id','contact_name','category','label','sub_label','current_status','status_history','remarks','priority','kiv','follow_up','premiums','examinations','recruit_programs','fieldwork','custom_fields','next_step','closed_date','created_at','updated_at'],
+  Cases:       ['id','owner_email','contact_id','contact_name','category','label','sub_label','current_status','status_history','remarks','priority','kiv','follow_up','premiums','examinations','recruit_programs','fieldwork','custom_fields','next_step','closed_date','created_at','updated_at','status_label'],
   Reminders:   ['id','owner_email','case_id','contact_name','category','title','date','time','done','created_at'],
   TeamActivity:['id','actor_email','action','target_email','category','details','timestamp']
 };
@@ -223,8 +223,21 @@ function caseToRow(c) {
     JSON.stringify(c.premiums||[]), JSON.stringify(c.examinations||[]),
     JSON.stringify(c.recruitPrograms||[]), JSON.stringify(c.fieldwork||[]),
     JSON.stringify(c.customFields||{}), c.nextStep||'', c.closedDate||'',
-    c.createdAt, c.updatedAt
+    c.createdAt, c.updatedAt, caseStatusLabel(c)
   ];
+}
+
+// Human-readable pipeline position, e.g. "Submitted to AIA (step 3 of 6)".
+// Computed here because step definitions (getStatusDef) only exist in the
+// browser — the WhatsApp PA reads this column to answer "my claim how already?"
+function caseStatusLabel(c) {
+  try {
+    const defs = getStatusDef(c.category) || [];
+    const cur = c.currentStatus || 0;
+    const label = getStatusLabel(c.category, cur, c);
+    if (!defs.length || !cur) return label || '';
+    return `${label} (step ${cur} of ${defs.length})`;
+  } catch (e) { return ''; }
 }
 
 function reminderToRow(r) {

@@ -288,13 +288,14 @@ function handlePALookup(update) {
 
   // Open cases for this contact (no closed_date)
   // cols: id, owner_email, contact_id(2), contact_name(3), category(4),
-  //       label(5), sub_label(6), current_status(7), ... next_step(18), closed_date(19)
+  //       label(5), sub_label(6), current_status(7), ... next_step(18),
+  //       closed_date(19), created(20), updated(21), status_label(22)
   const cases = getSheet('Cases')
     .filter(r => String(r[2]) === String(contact.id) && !r[19])
     .slice(0, 10)
     .map(r => ({
       category: r[4], label: r[5], subLabel: r[6],
-      status: r[7], nextStep: r[18]
+      status: r[7], statusLabel: r[22] || '', nextStep: r[18]
     }));
 
   return jsonOut({ ok: true, found: true, contact: contact, cases: cases });
