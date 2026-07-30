@@ -210,9 +210,11 @@ async function suggestReplies(contactName, jid, client) {
         `5) If the answer is NOT in the record, do not guess or invent — draft a reply saying ${CFG.ownerName} will check the details and get back to them, or offer a call. ` +
         `6) The record may be slightly outdated: for money amounts or claim decisions, prefer confirming ("let me double-check and confirm with you"). `
       : `4) If they ask about insurance/policy matters, be helpful but never invent policy details — suggest checking and getting back to them, or arranging a call. `) +
-    `Also classify the latest message into exactly one topic from: ${TOPICS.join(', ')}. ` +
+    `Also classify the latest message: topic = exactly one of: ${TOPICS.join(', ')}. ` +
+    `urgency = "urgent" (hospital admission, accident, death, angry client/complaint, time-critical money issue), ` +
+    `"low" (plain greetings, stickers, festival wishes, casual chit-chat), or "normal" (everything else). ` +
     `Output STRICTLY this JSON object, no markdown, no commentary: ` +
-    `{"topic":"<topic>","replies":["<reply1>","<reply2>","<reply3>"]}`;
+    `{"topic":"<topic>","urgency":"<urgency>","replies":["<reply1>","<reply2>","<reply3>"]}`;
 
   const user =
     (record ? `CLIENT RECORD (from CRM):\n${record}\n\n` : '') +
@@ -240,9 +242,11 @@ async function suggestReplies(contactName, jid, client) {
     return parseSuggestions(raw);
   } catch (e) {
     console.error('Groq request failed:', e.message);
-    return { topic: 'other', replies: [] };
+    return { topic: 'other', urgency: 'normal', replies: [] };
   }
 }
+
+const URGENCIES = ['urgent', 'normal', 'low'];
 
 // Fixed topic list — powers the /insights report
 const TOPICS = [
@@ -265,6 +269,7 @@ function parseSuggestions(raw) {
       if (Array.isArray(o.replies)) {
         return {
           topic: TOPICS.includes(o.topic) ? o.topic : 'other',
+          urgency: URGENCIES.includes(o.urgency) ? o.urgency : 'normal',
           replies: o.replies.map(String).filter(Boolean).slice(0, 3),
         };
       }
@@ -275,12 +280,13 @@ function parseSuggestions(raw) {
     try {
       const arr = JSON.parse(arrMatch[0]);
       if (Array.isArray(arr))
-        return { topic: 'other', replies: arr.map(String).filter(Boolean).slice(0, 3) };
+        return { topic: 'other', urgency: 'normal', replies: arr.map(String).filter(Boolean).slice(0, 3) };
     } catch (_) {}
   }
   // Fallback: take non-empty lines
   return {
     topic: 'other',
+    urgency: 'normal',
     replies: raw
       .split('\n')
       .map((l) => l.replace(/^\s*(\d+[.)]|[-*])\s*/, '').trim())
@@ -348,7 +354,11 @@ function insightsReport() {
     return Object.entries(c).sort((a, b) => b[1] - a[1]);
   };
 
+  const urgent7 = days7.filter((e) => e.urgency === 'urgent').length;
+  const urgent30 = days30.filter((e) => e.urgency === 'urgent').length;
+
   let out = `📈 <b>Insights — what clients ask you</b>\n`;
+  if (urgent30) out += `🚨 Urgent: <b>${urgent7}</b> in 7d · <b>${urgent30}</b> in 30d\n`;
   out += `\n<b>Last 7 days</b> (${days7.length} messages):\n`;
   count(days7).forEach(([t, n]) => (out += `${TOPIC_LABELS[t] || t}: <b>${n}</b>\n`));
   out += `\n<b>Last 30 days</b> (${days30.length} messages):\n`;
@@ -464,7 +474,9 @@ async function onIncomingMessage(m) {
   const name = client?.name || m.pushName || jid.split('@')[0];
 
   // AI suggestions only make sense for text
-  const ai = text ? await suggestReplies(name, jid, client) : { topic: 'media', replies: [] };
+  const ai = text
+    ? await suggestReplies(name, jid, client)
+    : { topic: 'media', urgency: 'normal', replies: [] };
   const suggestions = ai.replies;
 
   logInsight({
@@ -472,6 +484,7 @@ async function onIncomingMessage(m) {
     name,
     known: !!client,
     topic: ai.topic,
+    urgency: ai.urgency,
     snippet: String(displayText).slice(0, 120),
   });
 
@@ -484,6 +497,7 @@ async function onIncomingMessage(m) {
   }
 
   let body =
+    (ai.urgency === 'urgent' ? `🚨 <b>URGENT</b>\n` : '') +
     `💬 <b>${escHtml(name)}</b>${isGroup ? ' <i>(group)</i>' : ''}\n` +
     crmLine +
     `${escHtml(displayText)}\n`;
@@ -510,9 +524,21 @@ async function onIncomingMessage(m) {
       }
     : undefined;
 
-  const sent = await tgSend(body, keyboard ? { reply_markup: keyboard } : {});
+  const extra = {};
+  if (keyboard) extra.reply_markup = keyboard;
+  if (ai.urgency === 'low') extra.disable_notification = true; // silent ping for chit-chat
+
+  const sent = await tgSend(body, extra);
   if (sent.ok) {
     trackPending(sent.result.message_id, { jid, name, suggestions });
+    if (ai.urgency === 'urgent') {
+      // Pin urgent messages so they stay on top (best-effort)
+      tg('pinChatMessage', {
+        chat_id: CFG.telegramChatId,
+        message_id: sent.result.message_id,
+        disable_notification: true,
+      });
+    }
   }
 }
 
