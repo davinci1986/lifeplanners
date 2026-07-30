@@ -147,6 +147,7 @@ same as the existing LifePlanner AI Assistant.
 | Send a suggested reply | Tap **Send 1 / 2 / 3** under the notification |
 | Send your own reply | **Reply** (swipe) to the notification with your text |
 | Check it's alive | `/status` |
+| See what clients ask most | `/insights` — 7/30-day breakdown by topic (claims, premiums, coverage, appointments…) + most active contacts |
 | Silence it (meeting, night) | `/mute 90` (minutes) · `/unmute` |
 | Include group chats | `/groups on` · `/groups off` (default off) |
 

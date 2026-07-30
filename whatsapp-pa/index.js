@@ -18,6 +18,8 @@ const {
 const pino = require('pino');
 const QRCode = require('qrcode');
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 
 // ─── Config (all via environment variables) ────────────────────────
 const CFG = {
@@ -38,6 +40,9 @@ const CFG = {
   // Ignore backlog older than this many seconds (prevents a flood after reconnect).
   maxMessageAgeSec: parseInt(process.env.MAX_MESSAGE_AGE_SEC || '120', 10),
   authDir: process.env.AUTH_DIR || './auth',
+  // Message-topic log for /insights lives here — put it on the same
+  // persistent volume as auth (default: subfolder of it) so it survives redeploys.
+  dataDir: process.env.DATA_DIR || path.join(process.env.AUTH_DIR || './auth', 'data'),
   port: parseInt(process.env.PORT || '8080', 10),
 };
 
@@ -199,10 +204,11 @@ async function suggestReplies(contactName, jid, client) {
     (record
       ? `4) A CLIENT RECORD from ${CFG.ownerName}'s CRM is provided. When they ask about THEIR plan/policy/premium/case, answer using ONLY facts in that record (plan names, status, premiums, due dates, case progress). ` +
         `5) If the answer is NOT in the record, do not guess or invent — draft a reply saying ${CFG.ownerName} will check the details and get back to them, or offer a call. ` +
-        `6) The record may be slightly outdated: for money amounts or claim decisions, prefer confirming ("let me double-check and confirm with you"). ` +
-        `7) Output STRICTLY a JSON array of 3 strings. No markdown, no commentary.`
-      : `4) If they ask about insurance/policy matters, be helpful but never invent policy details — suggest checking and getting back to them, or arranging a call. ` +
-        `5) Output STRICTLY a JSON array of 3 strings. No markdown, no commentary.`);
+        `6) The record may be slightly outdated: for money amounts or claim decisions, prefer confirming ("let me double-check and confirm with you"). `
+      : `4) If they ask about insurance/policy matters, be helpful but never invent policy details — suggest checking and getting back to them, or arranging a call. `) +
+    `Also classify the latest message into exactly one topic from: ${TOPICS.join(', ')}. ` +
+    `Output STRICTLY this JSON object, no markdown, no commentary: ` +
+    `{"topic":"<topic>","replies":["<reply1>","<reply2>","<reply3>"]}`;
 
   const user =
     (record ? `CLIENT RECORD (from CRM):\n${record}\n\n` : '') +
@@ -230,25 +236,126 @@ async function suggestReplies(contactName, jid, client) {
     return parseSuggestions(raw);
   } catch (e) {
     console.error('Groq request failed:', e.message);
+    return { topic: 'other', replies: [] };
+  }
+}
+
+// Fixed topic list — powers the /insights report
+const TOPICS = [
+  'claim',
+  'premium_payment',
+  'coverage_question',
+  'new_plan_enquiry',
+  'appointment',
+  'policy_servicing',
+  'greeting_personal',
+  'other',
+];
+
+function parseSuggestions(raw) {
+  // Preferred: {"topic":"...","replies":[...]} — be forgiving if wrapped in text.
+  const objMatch = raw.match(/\{[\s\S]*\}/);
+  if (objMatch) {
+    try {
+      const o = JSON.parse(objMatch[0]);
+      if (Array.isArray(o.replies)) {
+        return {
+          topic: TOPICS.includes(o.topic) ? o.topic : 'other',
+          replies: o.replies.map(String).filter(Boolean).slice(0, 3),
+        };
+      }
+    } catch (_) {}
+  }
+  const arrMatch = raw.match(/\[[\s\S]*\]/);
+  if (arrMatch) {
+    try {
+      const arr = JSON.parse(arrMatch[0]);
+      if (Array.isArray(arr))
+        return { topic: 'other', replies: arr.map(String).filter(Boolean).slice(0, 3) };
+    } catch (_) {}
+  }
+  // Fallback: take non-empty lines
+  return {
+    topic: 'other',
+    replies: raw
+      .split('\n')
+      .map((l) => l.replace(/^\s*(\d+[.)]|[-*])\s*/, '').trim())
+      .filter((l) => l.length > 2)
+      .slice(0, 3),
+  };
+}
+
+// ─── Insights: log every incoming question, report with /insights ──
+const insightsFile = () => path.join(CFG.dataDir, 'messages.jsonl');
+
+function logInsight(entry) {
+  try {
+    fs.mkdirSync(CFG.dataDir, { recursive: true });
+    fs.appendFileSync(insightsFile(), JSON.stringify(entry) + '\n');
+    // Keep the log bounded (~5MB → drop oldest half)
+    const st = fs.statSync(insightsFile());
+    if (st.size > 5 * 1024 * 1024) {
+      const lines = fs.readFileSync(insightsFile(), 'utf8').split('\n').filter(Boolean);
+      fs.writeFileSync(insightsFile(), lines.slice(Math.floor(lines.length / 2)).join('\n') + '\n');
+    }
+  } catch (e) {
+    console.error('Insight log failed:', e.message);
+  }
+}
+
+function readInsights(sinceMs) {
+  try {
+    return fs
+      .readFileSync(insightsFile(), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => {
+        try { return JSON.parse(l); } catch (_) { return null; }
+      })
+      .filter((e) => e && e.ts >= sinceMs);
+  } catch (_) {
     return [];
   }
 }
 
-function parseSuggestions(raw) {
-  // Model is told to return a JSON array; be forgiving if it wraps it in text.
-  const match = raw.match(/\[[\s\S]*\]/);
-  if (match) {
-    try {
-      const arr = JSON.parse(match[0]);
-      if (Array.isArray(arr)) return arr.map(String).filter(Boolean).slice(0, 3);
-    } catch (_) {}
+const TOPIC_LABELS = {
+  claim: '🏥 Claims',
+  premium_payment: '💰 Premium / payment',
+  coverage_question: '🛡 Coverage questions',
+  new_plan_enquiry: '✨ New plan enquiries',
+  appointment: '📅 Appointments',
+  policy_servicing: '🔧 Policy servicing',
+  greeting_personal: '👋 Greetings / personal',
+  media: '📎 Media messages',
+  other: '❓ Other',
+};
+
+function insightsReport() {
+  const now = Date.now();
+  const days30 = readInsights(now - 30 * 86400000);
+  if (!days30.length) {
+    return '📈 <b>Insights</b>\n\nNo messages logged yet — data builds up as clients message you.';
   }
-  // Fallback: take non-empty lines
-  return raw
-    .split('\n')
-    .map((l) => l.replace(/^\s*(\d+[.)]|[-*])\s*/, '').trim())
-    .filter((l) => l.length > 2)
-    .slice(0, 3);
+  const days7 = days30.filter((e) => e.ts >= now - 7 * 86400000);
+
+  const count = (arr) => {
+    const c = {};
+    arr.forEach((e) => (c[e.topic] = (c[e.topic] || 0) + 1));
+    return Object.entries(c).sort((a, b) => b[1] - a[1]);
+  };
+
+  let out = `📈 <b>Insights — what clients ask you</b>\n`;
+  out += `\n<b>Last 7 days</b> (${days7.length} messages):\n`;
+  count(days7).forEach(([t, n]) => (out += `${TOPIC_LABELS[t] || t}: <b>${n}</b>\n`));
+  out += `\n<b>Last 30 days</b> (${days30.length} messages):\n`;
+  count(days30).forEach(([t, n]) => (out += `${TOPIC_LABELS[t] || t}: <b>${n}</b>\n`));
+
+  const byContact = {};
+  days30.forEach((e) => (byContact[e.name] = (byContact[e.name] || 0) + 1));
+  const top = Object.entries(byContact).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  out += `\n<b>Most active contacts (30d)</b>:\n`;
+  top.forEach(([n, c]) => (out += `• ${escHtml(n)} — ${c}\n`));
+  return out;
 }
 
 // ─── WhatsApp message handling ─────────────────────────────────────
@@ -311,7 +418,16 @@ async function onIncomingMessage(m) {
   const name = client?.name || m.pushName || jid.split('@')[0];
 
   // AI suggestions only make sense for text
-  const suggestions = text ? await suggestReplies(name, jid, client) : [];
+  const ai = text ? await suggestReplies(name, jid, client) : { topic: 'media', replies: [] };
+  const suggestions = ai.replies;
+
+  logInsight({
+    ts: Date.now(),
+    name,
+    known: !!client,
+    topic: ai.topic,
+    snippet: String(displayText).slice(0, 120),
+  });
 
   let crmLine = '';
   if (client) {
@@ -441,6 +557,7 @@ async function handleTelegramUpdate(upd) {
         `I watch your WhatsApp and notify you here with AI reply suggestions.\n\n` +
         `<b>Commands</b>\n` +
         `/status — connection &amp; stats\n` +
+        `/insights — what clients ask you most (7/30 days)\n` +
         `/mute 60 — silence notifications for N minutes\n` +
         `/unmute — resume notifications\n` +
         `/groups on|off — include group chats\n\n` +
@@ -460,6 +577,8 @@ async function handleTelegramUpdate(upd) {
         `AI: ${CFG.groqApiKey ? '🟢 ' + CFG.groqModel : '⚪ off'}\n` +
         `CRM lookup: ${CFG.crmProxyUrl && CFG.crmProxySecret ? '🟢 on' : '⚪ off'}`
     );
+  } else if (text === '/insights') {
+    await tgSend(insightsReport());
   } else if (text.startsWith('/mute')) {
     const mins = parseInt(text.split(/\s+/)[1], 10) || 60;
     mutedUntil = Date.now() + mins * 60000;
@@ -525,9 +644,16 @@ async function startWhatsApp() {
       if (code === DisconnectReason.loggedOut) {
         console.log('Logged out — need a fresh QR scan.');
         await tgSend('🔴 <b>WhatsApp session logged out.</b> Restarting to generate a new QR…');
-        // Wipe dead credentials so a fresh QR is generated
-        const fs = require('fs');
-        fs.rmSync(CFG.authDir, { recursive: true, force: true });
+        // Wipe dead credentials so a fresh QR is generated (keep the data subfolder)
+        try {
+          for (const f of fs.readdirSync(CFG.authDir)) {
+            if (path.resolve(CFG.authDir, f) !== path.resolve(CFG.dataDir)) {
+              fs.rmSync(path.join(CFG.authDir, f), { recursive: true, force: true });
+            }
+          }
+        } catch (e) {
+          console.error('Auth wipe failed:', e.message);
+        }
         setTimeout(startWhatsApp, 3000);
       } else {
         console.log(`Connection closed (code ${code}) — reconnecting…`);
