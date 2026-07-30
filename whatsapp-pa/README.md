@@ -147,7 +147,22 @@ same as the existing LifePlanner AI Assistant.
 | Send a suggested reply | Tap **Send 1 / 2 / 3** under the notification |
 | Send your own reply | **Reply** (swipe) to the notification with your text |
 | Check it's alive | `/status` |
-| See what clients ask most | `/insights` — 7/30-day breakdown by topic (claims, premiums, coverage, appointments…) + most active contacts |
+| See what clients ask most | `/insights` — 7/30-day breakdown by topic + urgent count + most active contacts |
+| See who's waiting for a reply | `/pending` — un-replied chats, oldest first (auto-nudges after `FOLLOWUP_HOURS`, default 3h, 9am–10pm MYT only) |
+
+**More Jarvis behaviours (all automatic):**
+
+- 🎙 **Voice notes are transcribed** (free Groq Whisper) and get reply
+  suggestions like any text message. Disable with `TRANSCRIBE_VOICE=false`.
+- 🚨 **Urgent messages** (hospital admission, accident, angry client) are
+  flagged `URGENT` and pinned in Telegram; greetings/stickers arrive
+  silently so they don't buzz your phone.
+- 📋 **Claim/case status answers**: "my claim how already?" is answered from
+  your actual case pipeline ("Submitted to AIA — step 3 of 6"). Requires one
+  LifePlanner login after this update so the new status column syncs.
+- 📖 **Agency fact sheet**: edit `facts.md` (hotlines, payment methods,
+  panel hospital link, FAQs) and JARVIS quotes those facts exactly.
+  `<TODO>` lines are ignored, never guessed.
 | Silence it (meeting, night) | `/mute 90` (minutes) · `/unmute` |
 | Include group chats | `/groups on` · `/groups off` (default off) |
 

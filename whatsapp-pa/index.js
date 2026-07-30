@@ -135,6 +135,16 @@ function escHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// ─── Agency fact sheet (facts.md — Keith-editable, authoritative) ──
+let FACTS = '';
+try {
+  const factsPath = process.env.FACTS_FILE || path.join(__dirname, 'facts.md');
+  FACTS = fs.readFileSync(factsPath, 'utf8').slice(0, 3000);
+  console.log(`Fact sheet loaded (${FACTS.length} chars).`);
+} catch (_) {
+  console.log('No facts.md found — running without the agency fact sheet.');
+}
+
 // ─── CRM lookup (LifePlanner Google Sheet via Apps Script) ─────────
 const crmCache = new Map(); // phone → { at, client } (client = null if not found)
 const CRM_CACHE_TTL = 10 * 60 * 1000;
@@ -219,6 +229,9 @@ async function suggestReplies(contactName, jid, client) {
     `{"topic":"<topic>","urgency":"<urgency>","replies":["<reply1>","<reply2>","<reply3>"]}`;
 
   const user =
+    (FACTS
+      ? `AGENCY FACT SHEET (authoritative — quote these facts exactly; any line containing "<TODO" is not filled in yet, NEVER mention or guess those):\n${FACTS}\n\n`
+      : '') +
     (record ? `CLIENT RECORD (from CRM):\n${record}\n\n` : '') +
     `Conversation with ${contactName} (last messages, oldest first):\n${convo}\n\nDraft 3 reply options to their latest message.`;
 
