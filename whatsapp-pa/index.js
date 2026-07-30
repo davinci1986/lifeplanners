@@ -42,6 +42,8 @@ const CFG = {
   transcribeVoice: process.env.TRANSCRIBE_VOICE !== 'false',
   // Ignore backlog older than this many seconds (prevents a flood after reconnect).
   maxMessageAgeSec: parseInt(process.env.MAX_MESSAGE_AGE_SEC || '120', 10),
+  // Nudge on Telegram if a client waited this long with no reply (9am–10pm MYT only).
+  followupHours: parseFloat(process.env.FOLLOWUP_HOURS || '3'),
   authDir: process.env.AUTH_DIR || './auth',
   // Message-topic log for /insights lives here — put it on the same
   // persistent volume as auth (default: subfolder of it) so it survives redeploys.
@@ -372,6 +374,61 @@ function insightsReport() {
   return out;
 }
 
+// ─── Follow-up nudges: track chats waiting for a reply ─────────────
+const followupsFile = () => path.join(CFG.dataDir, 'followups.json');
+let followups = {}; // jid → { name, lastIncoming, lastOutgoing, nudged, snippet }
+try { followups = JSON.parse(fs.readFileSync(followupsFile(), 'utf8')) || {}; } catch (_) {}
+
+function saveFollowups() {
+  try {
+    fs.mkdirSync(CFG.dataDir, { recursive: true });
+    fs.writeFileSync(followupsFile(), JSON.stringify(followups));
+  } catch (e) {
+    console.error('Followups save failed:', e.message);
+  }
+}
+
+function followupIncoming(jid, name, snippet) {
+  followups[jid] = { ...(followups[jid] || {}), name, lastIncoming: Date.now(), snippet, nudged: false };
+  saveFollowups();
+}
+
+function followupReplied(jid) {
+  if (!followups[jid]) return;
+  followups[jid].lastOutgoing = Date.now();
+  followups[jid].nudged = false;
+  saveFollowups();
+}
+
+function pendingChats() {
+  return Object.entries(followups)
+    .filter(([, f]) => f.lastIncoming && f.lastIncoming > (f.lastOutgoing || 0))
+    .sort((a, b) => a[1].lastIncoming - b[1].lastIncoming);
+}
+
+const mytNow = () => new Date(Date.now() + 8 * 3600000); // MYT = UTC+8, no DST
+
+async function followupSweep() {
+  if (Date.now() < mutedUntil) return;
+  const h = mytNow().getUTCHours();
+  if (h < 9 || h >= 22) return; // don't nudge at night
+  let dirty = false;
+  for (const [jid, f] of pendingChats()) {
+    if (f.nudged) continue;
+    if (Date.now() - f.lastIncoming < CFG.followupHours * 3600000) continue;
+    f.nudged = true;
+    dirty = true;
+    const when = new Date(f.lastIncoming + 8 * 3600000).toISOString().slice(11, 16);
+    const sent = await tgSend(
+      `⏰ <b>${escHtml(f.name)}</b> is still waiting — no reply since ${when} MYT:\n` +
+        `“${escHtml(f.snippet || '')}”\n\n<i>Reply to this message with text to answer them now.</i>`
+    );
+    if (sent.ok) trackPending(sent.result.message_id, { jid, name: f.name, suggestions: [] });
+  }
+  if (dirty) saveFollowups();
+}
+setInterval(() => followupSweep().catch((e) => console.error('Followup sweep error:', e.message)), 15 * 60 * 1000);
+
 // ─── Voice note transcription (Groq Whisper, free) ─────────────────
 function getVoiceNote(msg) {
   const m = msg?.ephemeralMessage?.message || msg?.viewOnceMessage?.message || msg;
@@ -437,6 +494,7 @@ async function onIncomingMessage(m) {
     // Track our own replies (sent from phone or JARVIS) for conversation context
     const ownText = extractText(m.message);
     if (ownText) remember(jid, 'me', ownText);
+    followupReplied(jid); // any reply (even media) clears the pending nudge
     return;
   }
 
@@ -463,6 +521,9 @@ async function onIncomingMessage(m) {
 
   const displayText = isVoice ? `🎙 Voice note (transcribed):\n“${text}”` : text || media;
   if (text) remember(jid, 'them', text);
+  if (!isGroup) {
+    followupIncoming(jid, m.pushName || jid.split('@')[0], String(displayText).slice(0, 100));
+  }
 
   if (Date.now() < mutedUntil) return; // muted — stay silent
 
@@ -546,6 +607,7 @@ async function sendWhatsApp(jid, text) {
   if (!sock || !waConnected) throw new Error('WhatsApp not connected');
   await sock.sendMessage(jid, { text });
   remember(jid, 'me', text);
+  followupReplied(jid);
 }
 
 // ─── Telegram long-polling (buttons + custom replies + commands) ───
@@ -630,6 +692,7 @@ async function handleTelegramUpdate(upd) {
         `<b>Commands</b>\n` +
         `/status — connection &amp; stats\n` +
         `/insights — what clients ask you most (7/30 days)\n` +
+        `/pending — chats still waiting for your reply\n` +
         `/mute 60 — silence notifications for N minutes\n` +
         `/unmute — resume notifications\n` +
         `/groups on|off — include group chats\n\n` +
@@ -651,6 +714,20 @@ async function handleTelegramUpdate(upd) {
     );
   } else if (text === '/insights') {
     await tgSend(insightsReport());
+  } else if (text === '/pending') {
+    const list = pendingChats();
+    if (!list.length) {
+      await tgSend('✅ No one is waiting — all chats replied.');
+    } else {
+      let out = `⏳ <b>Waiting for your reply (${list.length})</b>\n\n`;
+      list.slice(0, 15).forEach(([, f]) => {
+        const mins = Math.round((Date.now() - f.lastIncoming) / 60000);
+        const ago = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+        out += `• <b>${escHtml(f.name)}</b> — ${ago} ago: “${escHtml(String(f.snippet || '').slice(0, 60))}”\n`;
+      });
+      if (list.length > 15) out += `…and ${list.length - 15} more\n`;
+      await tgSend(out);
+    }
   } else if (text.startsWith('/mute')) {
     const mins = parseInt(text.split(/\s+/)[1], 10) || 60;
     mutedUntil = Date.now() + mins * 60000;
