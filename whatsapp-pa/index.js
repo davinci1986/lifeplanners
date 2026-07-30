@@ -14,6 +14,7 @@ const {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   DisconnectReason,
+  downloadMediaMessage,
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const QRCode = require('qrcode');
@@ -37,6 +38,8 @@ const CFG = {
   crmProxySecret: process.env.CRM_PROXY_SECRET || '',
   // Notify for group chats too? Default off (groups are noisy).
   watchGroups: process.env.WATCH_GROUPS === 'true',
+  // Transcribe voice notes with Groq Whisper (free). On by default when a Groq key exists.
+  transcribeVoice: process.env.TRANSCRIBE_VOICE !== 'false',
   // Ignore backlog older than this many seconds (prevents a flood after reconnect).
   maxMessageAgeSec: parseInt(process.env.MAX_MESSAGE_AGE_SEC || '120', 10),
   authDir: process.env.AUTH_DIR || './auth',
@@ -358,6 +361,35 @@ function insightsReport() {
   return out;
 }
 
+// ─── Voice note transcription (Groq Whisper, free) ─────────────────
+function getVoiceNote(msg) {
+  const m = msg?.ephemeralMessage?.message || msg?.viewOnceMessage?.message || msg;
+  return m?.audioMessage?.ptt ? m.audioMessage : null;
+}
+
+async function transcribeVoice(m, audio) {
+  // Guards: skip long/huge notes (>3 min or >10MB)
+  if ((audio.seconds || 0) > 180 || Number(audio.fileLength || 0) > 10 * 1024 * 1024) return null;
+  try {
+    const buf = await downloadMediaMessage(m, 'buffer', {});
+    if (!buf || !buf.length) return null;
+    const form = new FormData();
+    form.append('model', 'whisper-large-v3-turbo');
+    form.append('file', new Blob([buf], { type: audio.mimetype || 'audio/ogg' }), 'voice.ogg');
+    const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${CFG.groqApiKey}` },
+      body: form,
+    });
+    const data = await res.json();
+    const text = (data.text || '').trim();
+    return text.length > 1 ? text : null;
+  } catch (e) {
+    console.error('Voice transcription failed:', e.message);
+    return null;
+  }
+}
+
 // ─── WhatsApp message handling ─────────────────────────────────────
 function extractText(msg) {
   const m = msg?.ephemeralMessage?.message || msg?.viewOnceMessage?.message || msg;
@@ -401,11 +433,24 @@ async function onIncomingMessage(m) {
   const ts = Number(m.messageTimestamp) * 1000;
   if (ts && Date.now() - ts > CFG.maxMessageAgeSec * 1000) return;
 
-  const text = extractText(m.message);
+  let text = extractText(m.message);
   const media = mediaLabel(m.message);
   if (!text && !media) return;
 
-  const displayText = text || media;
+  // Voice notes: transcribe so they get suggestions like any text message
+  let isVoice = false;
+  if (!text && CFG.transcribeVoice && CFG.groqApiKey) {
+    const audio = getVoiceNote(m.message);
+    if (audio) {
+      const transcript = await transcribeVoice(m, audio);
+      if (transcript) {
+        text = transcript;
+        isVoice = true;
+      }
+    }
+  }
+
+  const displayText = isVoice ? `🎙 Voice note (transcribed):\n“${text}”` : text || media;
   if (text) remember(jid, 'them', text);
 
   if (Date.now() < mutedUntil) return; // muted — stay silent
