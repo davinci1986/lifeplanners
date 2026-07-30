@@ -100,6 +100,46 @@ automatically sends you a fresh QR on Telegram.
 
 ---
 
+## Client-aware replies (CRM + ALPP data)
+
+With `CRM_PROXY_URL` + `CRM_PROXY_SECRET` set, JARVIS recognises **who** is
+messaging you (matched by phone number against your LifePlanner CRM) and
+drafts replies using their **actual data** — AIA plan names, policy status,
+premiums, next due dates, and open case progress:
+
+> 💬 **Tan Ah Kow** · 📇 *CRM: 2 AIA policies · 1 open case*
+> "Keith, when is my premium due ah?"
+>
+> **1.** Hi Mr Tan! Your A-Life Med Regular premium is due on 15 Aug — I'll
+> send you a reminder nearer the date. Anything else I can help with? 😊
+
+**How the data flows (and how to keep it fresh):**
+
+```
+AIA ALPP portal ──(run alpp_scraper_pass3.js while logged in, ~monthly)──►
+CRM (🔄 ALPP Enrich import) ──(auto Google Sheet sync)──►
+JARVIS looks up client by phone at message time (cached 10 min)
+```
+
+⚠️ JARVIS deliberately does **not** log into ALPP/ALPA directly: AIA's agent
+portal has no API, needs your agent credentials + OTP, and automating it
+24/7 from a server would risk your agency compliance. The scraper-refresh
+flow above gets the same data safely.
+
+**Setup for this feature:**
+
+1. In `telegram_bot.gs`, set `PA_SECRET` to a long random string and
+   redeploy the Apps Script web app (New Deployment → same settings).
+2. Set `CRM_PROXY_URL` (the web app `/exec` URL) and `CRM_PROXY_SECRET`
+   (same string) on the JARVIS host.
+3. Log into LifePlanner once on your browser so the updated sync pushes
+   full profiles (with policies) to the Google Sheet.
+
+The AI is instructed to answer client questions **only** from the CRM
+record, to say "let me double-check" for amounts/claim decisions, and never
+to guess. Note: the client's record is sent to Groq's API for drafting —
+same as the existing LifePlanner AI Assistant.
+
 ## Daily use
 
 | Action | How |

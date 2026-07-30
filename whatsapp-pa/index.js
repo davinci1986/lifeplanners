@@ -29,6 +29,10 @@ const CFG = {
   ownerRole:
     process.env.OWNER_ROLE ||
     'an AIA Life Planner (insurance agent) in Malaysia serving clients in English, Malay and Chinese',
+  // LifePlanner Apps Script web app URL + shared secret — lets JARVIS look up
+  // the sender in your CRM (name, AIA policies, open cases) for personalised replies.
+  crmProxyUrl: process.env.CRM_PROXY_URL || '',
+  crmProxySecret: process.env.CRM_PROXY_SECRET || '',
   // Notify for group chats too? Default off (groups are noisy).
   watchGroups: process.env.WATCH_GROUPS === 'true',
   // Ignore backlog older than this many seconds (prevents a flood after reconnect).
@@ -121,12 +125,70 @@ function escHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// ─── CRM lookup (LifePlanner Google Sheet via Apps Script) ─────────
+const crmCache = new Map(); // phone → { at, client } (client = null if not found)
+const CRM_CACHE_TTL = 10 * 60 * 1000;
+
+async function lookupClient(phone) {
+  if (!CFG.crmProxyUrl || !CFG.crmProxySecret || !phone) return null;
+  const cached = crmCache.get(phone);
+  if (cached && Date.now() - cached.at < CRM_CACHE_TTL) return cached.client;
+  try {
+    const res = await fetch(CFG.crmProxyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pa: 'lookup', secret: CFG.crmProxySecret, phone }),
+      redirect: 'follow', // Apps Script replies via 302 redirect
+    });
+    const data = await res.json();
+    const client = data.ok && data.found ? { ...data.contact, cases: data.cases || [] } : null;
+    crmCache.set(phone, { at: Date.now(), client });
+    if (crmCache.size > 500) crmCache.delete(crmCache.keys().next().value);
+    return client;
+  } catch (e) {
+    console.error('CRM lookup failed:', e.message);
+    return null;
+  }
+}
+
+function clientRecordText(client) {
+  if (!client) return '';
+  const lines = [`Name: ${client.name}`];
+  if (client.dob) lines.push(`DOB: ${client.dob}`);
+  if (client.occupation) lines.push(`Occupation: ${client.occupation}`);
+  if (client.tags?.length) lines.push(`Tags: ${client.tags.join(', ')}`);
+  if (client.aiaPolicies?.length) {
+    lines.push('AIA policies:');
+    client.aiaPolicies.forEach((p) => {
+      lines.push(
+        `  - ${p.planName || 'Unknown plan'} (policy ${p.policyNo || '?'}, status ${p.policyStatus || '?'})` +
+          `${p.sumAssured ? `, sum assured ${p.sumAssured}` : ''}` +
+          `${p.annualPremium ? `, annual premium ${p.annualPremium}` : ''}` +
+          `${p.nextDueDate ? `, next due ${p.nextDueDate}` : ''}`
+      );
+    });
+  }
+  if (client.existingInsurance?.length) lines.push(`Other insurance: ${client.existingInsurance.join(', ')}`);
+  if (client.cases?.length) {
+    lines.push('Open cases with us:');
+    client.cases.forEach((c) => {
+      lines.push(
+        `  - ${c.category || ''}${c.label ? ' / ' + c.label : ''}${c.status ? ` — status: ${c.status}` : ''}${c.nextStep ? ` — next step: ${c.nextStep}` : ''}`
+      );
+    });
+  }
+  if (client.notes) lines.push(`Notes: ${String(client.notes).slice(0, 400)}`);
+  return lines.join('\n');
+}
+
 // ─── Groq: draft reply suggestions ─────────────────────────────────
-async function suggestReplies(contactName, jid) {
+async function suggestReplies(contactName, jid, client) {
   if (!CFG.groqApiKey) return [];
   const convo = (history.get(jid) || [])
     .map((m) => `${m.from === 'me' ? CFG.ownerName : contactName}: ${m.text}`)
     .join('\n');
+
+  const record = clientRecordText(client);
 
   const system =
     `You are the personal assistant of ${CFG.ownerName}, ${CFG.ownerRole}. ` +
@@ -134,10 +196,17 @@ async function suggestReplies(contactName, jid) {
     `1) Reply in the SAME language the contact used (English, Malay, Chinese or Manglish mix). ` +
     `2) Keep each reply short and natural like a real WhatsApp message — no signatures, no "Dear". ` +
     `3) Offer 3 options with different tones: (a) warm & personal, (b) professional, (c) short & efficient. ` +
-    `4) If they ask about insurance/policy matters, be helpful but never invent policy details — suggest checking and getting back to them, or arranging a call. ` +
-    `5) Output STRICTLY a JSON array of 3 strings. No markdown, no commentary.`;
+    (record
+      ? `4) A CLIENT RECORD from ${CFG.ownerName}'s CRM is provided. When they ask about THEIR plan/policy/premium/case, answer using ONLY facts in that record (plan names, status, premiums, due dates, case progress). ` +
+        `5) If the answer is NOT in the record, do not guess or invent — draft a reply saying ${CFG.ownerName} will check the details and get back to them, or offer a call. ` +
+        `6) The record may be slightly outdated: for money amounts or claim decisions, prefer confirming ("let me double-check and confirm with you"). ` +
+        `7) Output STRICTLY a JSON array of 3 strings. No markdown, no commentary.`
+      : `4) If they ask about insurance/policy matters, be helpful but never invent policy details — suggest checking and getting back to them, or arranging a call. ` +
+        `5) Output STRICTLY a JSON array of 3 strings. No markdown, no commentary.`);
 
-  const user = `Conversation with ${contactName} (last messages, oldest first):\n${convo}\n\nDraft 3 reply options to their latest message.`;
+  const user =
+    (record ? `CLIENT RECORD (from CRM):\n${record}\n\n` : '') +
+    `Conversation with ${contactName} (last messages, oldest first):\n${convo}\n\nDraft 3 reply options to their latest message.`;
 
   try {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -229,7 +298,6 @@ async function onIncomingMessage(m) {
   const media = mediaLabel(m.message);
   if (!text && !media) return;
 
-  const name = m.pushName || jid.split('@')[0];
   const displayText = text || media;
   if (text) remember(jid, 'them', text);
 
@@ -237,11 +305,25 @@ async function onIncomingMessage(m) {
 
   notifCount++;
 
+  // CRM lookup by sender phone (only individual chats carry a usable number)
+  const phone = !isGroup && jid.endsWith('@s.whatsapp.net') ? jid.split('@')[0] : '';
+  const client = phone ? await lookupClient(phone) : null;
+  const name = client?.name || m.pushName || jid.split('@')[0];
+
   // AI suggestions only make sense for text
-  const suggestions = text ? await suggestReplies(name, jid) : [];
+  const suggestions = text ? await suggestReplies(name, jid, client) : [];
+
+  let crmLine = '';
+  if (client) {
+    const bits = [];
+    if (client.aiaPolicies?.length) bits.push(`${client.aiaPolicies.length} AIA polic${client.aiaPolicies.length > 1 ? 'ies' : 'y'}`);
+    if (client.cases?.length) bits.push(`${client.cases.length} open case${client.cases.length > 1 ? 's' : ''}`);
+    crmLine = `📇 <i>CRM: ${escHtml(bits.length ? bits.join(' · ') : 'known contact')}</i>\n`;
+  }
 
   let body =
     `💬 <b>${escHtml(name)}</b>${isGroup ? ' <i>(group)</i>' : ''}\n` +
+    crmLine +
     `${escHtml(displayText)}\n`;
   if (suggestions.length) {
     body += `\n🤖 <b>Suggested replies:</b>\n`;
@@ -375,7 +457,8 @@ async function handleTelegramUpdate(upd) {
         `Notifications sent: ${notifCount}\n` +
         `Groups watched: ${CFG.watchGroups ? 'yes' : 'no'}\n` +
         `Muted: ${muted}\n` +
-        `AI: ${CFG.groqApiKey ? '🟢 ' + CFG.groqModel : '⚪ off'}`
+        `AI: ${CFG.groqApiKey ? '🟢 ' + CFG.groqModel : '⚪ off'}\n` +
+        `CRM lookup: ${CFG.crmProxyUrl && CFG.crmProxySecret ? '🟢 on' : '⚪ off'}`
     );
   } else if (text.startsWith('/mute')) {
     const mins = parseInt(text.split(/\s+/)[1], 10) || 60;

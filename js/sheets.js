@@ -9,7 +9,7 @@ const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
 // Sheet definitions: name → [header columns]
 const SHEET_DEFS = {
   Users:       ['email','name','role','manager_email','agent_code','status','created_at'],
-  Contacts:    ['id','owner_email','name','phone','email_addr','nric','dob','occupation','notes','tags','created_at','updated_at'],
+  Contacts:    ['id','owner_email','name','phone','email_addr','nric','dob','occupation','notes','tags','created_at','updated_at','profile_json'],
   Cases:       ['id','owner_email','contact_id','contact_name','category','label','sub_label','current_status','status_history','remarks','priority','kiv','follow_up','premiums','examinations','recruit_programs','fieldwork','custom_fields','next_step','closed_date','created_at','updated_at'],
   Reminders:   ['id','owner_email','case_id','contact_name','category','title','date','time','done','created_at'],
   TeamActivity:['id','actor_email','action','target_email','category','details','timestamp']
@@ -203,10 +203,14 @@ async function pushRowsBatch(sheetName, items, toRow) {
 }
 
 function contactToRow(c) {
+  // profile_json carries the FULL contact (aiaPolicies, existingInsurance,
+  // and any future fields) so other devices and the WhatsApp PA get everything.
+  let profileJson = '';
+  try { profileJson = JSON.stringify(c); } catch (e) { profileJson = ''; }
   return [
     c.id, c.ownerEmail||currentUserEmail()||'', c.name, c.phone||'',
     c.email||'', c.nric||'', c.dob||'', c.occupation||'', c.notes||'',
-    JSON.stringify(c.tags||[]), c.createdAt, c.updatedAt
+    JSON.stringify(c.tags||[]), c.createdAt, c.updatedAt, profileJson
   ];
 }
 
@@ -339,11 +343,18 @@ function mergeMyRows(collection, rows, converter, myEmail) {
 /* ---- ROW CONVERTERS ---- */
 function sheetRowToContact(r) {
   try {
-    return {
+    // Full profile (incl. aiaPolicies/existingInsurance) from profile_json;
+    // explicit columns win so a malformed blob can't corrupt core fields.
+    let full = {};
+    try { full = JSON.parse(r[12] || '{}') || {}; } catch (e) { full = {}; }
+    const c = Object.assign({}, full, {
       id:r[0], ownerEmail:r[1], name:r[2], phone:r[3], email:r[4],
       nric:r[5], dob:r[6], occupation:r[7], notes:r[8],
       tags:JSON.parse(r[9]||'[]'), createdAt:r[10], updatedAt:r[11]
-    };
+    });
+    if (!Array.isArray(c.aiaPolicies)) c.aiaPolicies = c.aiaPolicies ? [c.aiaPolicies] : [];
+    if (!Array.isArray(c.existingInsurance)) c.existingInsurance = c.existingInsurance ? [c.existingInsurance] : [];
+    return c;
   } catch { return null; }
 }
 

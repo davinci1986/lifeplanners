@@ -7,6 +7,7 @@ const BOT_TOKEN = ''; // ← paste your Telegram bot token here
 const ALLOWED_CHAT_ID = ''; // ← paste your Chat ID here (security: only you can use it)
 const SPREADSHEET_ID = ''; // ← paste your Google Sheet ID here
 const GROQ_API_KEY = ''; // ← paste your Groq API key here (gsk_...) for the AI Assistant (free)
+const PA_SECRET = ''; // ← any long random string; must match CRM_PROXY_SECRET in the WhatsApp PA
 
 // ─── ENTRY POINT ───────────────────────────────────────────────
 function doPost(e) {
@@ -21,6 +22,9 @@ function doPost(e) {
     // Two-factor login OTP (called from the web app)
     if (update.otp === 'send')   return handleOtpSend(update);
     if (update.otp === 'verify') return handleOtpVerify(update);
+
+    // WhatsApp PA: look up a client by phone number (called by JARVIS, not Telegram)
+    if (update.pa === 'lookup') return handlePALookup(update);
 
     const msg = update.message || update.edited_message;
     if (!msg) return ok();
@@ -252,6 +256,53 @@ function handleAIProxy(data) {
   } catch (err) {
     return jsonOut({ ok: false, error: String(err) });
   }
+}
+
+// ─── WHATSAPP PA: CLIENT LOOKUP ────────────────────────────────
+// POST { pa:'lookup', secret:PA_SECRET, phone:'60123456789' }
+// Matches the phone (last 9 digits) against Contacts, returns the full
+// profile (incl. aiaPolicies from profile_json) + open cases.
+function handlePALookup(update) {
+  if (!PA_SECRET || update.secret !== PA_SECRET) {
+    return jsonOut({ ok: false, error: 'unauthorised' });
+  }
+  const digits = String(update.phone || '').replace(/\D/g, '');
+  if (digits.length < 7) return jsonOut({ ok: false, error: 'bad phone' });
+  const tail = digits.slice(-9);
+
+  const contacts = getSheet('Contacts');
+  // cols: id, owner_email, name(2), phone(3), ... updated_at(11), profile_json(12)
+  const row = contacts.find(r => String(r[3] || '').replace(/\D/g, '').slice(-9) === tail);
+  if (!row) return jsonOut({ ok: true, found: false });
+
+  let profile = {};
+  try { profile = JSON.parse(row[12] || '{}') || {}; } catch (e) { profile = {}; }
+
+  const contact = {
+    id: row[0], name: row[2], phone: row[3], email: row[4],
+    dob: row[6], occupation: row[7], notes: row[8],
+    tags: safeParseArr(row[9]),
+    aiaPolicies: Array.isArray(profile.aiaPolicies) ? profile.aiaPolicies : [],
+    existingInsurance: Array.isArray(profile.existingInsurance) ? profile.existingInsurance : []
+  };
+
+  // Open cases for this contact (no closed_date)
+  // cols: id, owner_email, contact_id(2), contact_name(3), category(4),
+  //       label(5), sub_label(6), current_status(7), ... next_step(18), closed_date(19)
+  const cases = getSheet('Cases')
+    .filter(r => String(r[2]) === String(contact.id) && !r[19])
+    .slice(0, 10)
+    .map(r => ({
+      category: r[4], label: r[5], subLabel: r[6],
+      status: r[7], nextStep: r[18]
+    }));
+
+  return jsonOut({ ok: true, found: true, contact: contact, cases: cases });
+}
+
+function safeParseArr(v) {
+  try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; }
+  catch (e) { return []; }
 }
 
 function jsonOut(obj) {
