@@ -232,23 +232,31 @@ function handleAIProxy(data) {
     if (data.system) messages.push({ role: 'system', content: data.system });
     (data.messages || []).forEach(m => messages.push({ role: m.role, content: m.content }));
 
-    const res = UrlFetchApp.fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'post',
-      contentType: 'application/json',
-      headers: { 'Authorization': 'Bearer ' + GROQ_API_KEY },
-      muteHttpExceptions: true,
-      payload: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        max_tokens: data.max_tokens || 1500,
-        messages: messages
-      })
-    });
-    const body = JSON.parse(res.getContentText());
-    if (body.error) {
-      return jsonOut({ ok: false, error: body.error.message || 'AI error' });
+    // Groq retires models over time — try each in order until one works (self-healing).
+    const MODELS = ['openai/gpt-oss-120b', 'qwen/qwen3.6-27b', 'openai/gpt-oss-20b'];
+    let lastErr = 'AI error';
+    for (let i = 0; i < MODELS.length; i++) {
+      const res = UrlFetchApp.fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'post',
+        contentType: 'application/json',
+        headers: { 'Authorization': 'Bearer ' + GROQ_API_KEY },
+        muteHttpExceptions: true,
+        payload: JSON.stringify({
+          model: MODELS[i],
+          max_tokens: data.max_tokens || 1500,
+          messages: messages
+        })
+      });
+      const body = JSON.parse(res.getContentText());
+      if (!body.error) {
+        const text = (body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content) || '';
+        return jsonOut({ ok: true, text: text, model: MODELS[i] });
+      }
+      lastErr = body.error.message || 'AI error';
+      // Unknown/retired model → try next; other errors (bad key, rate limit) → stop
+      if (!/does not exist|decommissioned|deprecated|not found|no longer supported/i.test(lastErr)) break;
     }
-    const text = (body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content) || '';
-    return jsonOut({ ok: true, text: text });
+    return jsonOut({ ok: false, error: lastErr });
   } catch (err) {
     return jsonOut({ ok: false, error: String(err) });
   }
