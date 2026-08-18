@@ -37,16 +37,18 @@ function buildCRMContext() {
   cases.forEach(c => { cats[c.category] = (cats[c.category] || 0) + 1; });
   const catLine = Object.entries(cats).map(([k, v]) => `${k}:${v}`).join(', ');
 
-  // Per-contact one-liners (cap to keep tokens sane). No NRIC, no full phone.
+  // Compact per-contact lines (pipe format ≈ 40% fewer tokens than prose).
+  // No NRIC, no full phone.
   const lines = contacts.slice(0, 120).map(c => {
     const age = c.dob ? ageFromDOB(c.dob) : '';
     const cs = getCasesForContact(c.id);
-    const csTxt = cs.map(x => `${x.category}/${getStatusLabel(x.category, x.currentStatus)}${x.kiv ? '(KIV)' : ''}`).join('; ');
+    const csTxt = cs.map(x => `${x.category}:${getStatusLabel(x.category, x.currentStatus)}${x.kiv ? '(KIV)' : ''}`).join(',');
     const ins = Array.isArray(c.existingInsurance) ? c.existingInsurance.filter(Boolean).join('/') : (c.existingInsurance || '');
-    return `- ${c.name}${age ? ', ' + age + 'yo' : ''}${c.race ? ', ' + c.race : ''}${c.occupation ? ', ' + c.occupation : ''}${c.income ? ', income ' + c.income : ''}${ins ? ', has: ' + ins : ', NO insurance'}${csTxt ? ' | cases: ' + csTxt : ''}`;
+    return `${c.name}|${age}|${c.race || ''}|${c.occupation || ''}|${c.income || ''}|${c.stayArea || c.state || ''}|${ins || 'NO-INS'}|${csTxt}`;
   });
 
-  return `Today: ${today}\nTotal contacts: ${contacts.length}. Cases by category: ${catLine || 'none'}.\n\nContacts:\n${lines.join('\n')}`;
+  return `Today: ${today}. ${contacts.length} contacts. Cases: ${catLine || 'none'}.\n` +
+    `Format: Name|Age|Race|Job|Income|Area|Insurance(NO-INS=none)|Cases\n${lines.join('\n')}`;
 }
 
 function aiSystemPrompt() {
@@ -128,17 +130,20 @@ async function aiSend() {
   renderAIAssistant();
 
   try {
-    // First user turn carries the CRM context; later turns rely on history.
+    // Keep only recent history (rate-limit friendly); the first user turn in
+    // the window carries the CRM context.
     const ctx = buildCRMContext();
-    const msgs = _aiChat
-      .filter(m => m.content !== '…thinking')
-      .map((m, i) => {
-        if (m.role === 'user' && i === 0) {
-          return { role: 'user', content: `${m.content}\n\n---\nMy CRM data:\n${ctx}` };
-        }
-        return { role: m.role, content: m.content };
-      });
-    const reply = await aiProxyCall(msgs, aiSystemPrompt(), 1800);
+    const recent = _aiChat.filter(m => m.content !== '…thinking').slice(-8);
+    while (recent.length && recent[0].role !== 'user') recent.shift(); // window must start with a user turn
+    let ctxAttached = false;
+    const msgs = recent.map(m => {
+      if (m.role === 'user' && !ctxAttached) {
+        ctxAttached = true;
+        return { role: 'user', content: `${m.content}\n\n---\nMy CRM data:\n${ctx}` };
+      }
+      return { role: m.role, content: m.content };
+    });
+    const reply = await aiProxyCall(msgs, aiSystemPrompt(), 1200);
     _aiChat[_aiChat.length - 1] = { role: 'assistant', content: reply };
   } catch (e) {
     _aiChat[_aiChat.length - 1] = { role: 'assistant', content: '⚠️ ' + e.message };

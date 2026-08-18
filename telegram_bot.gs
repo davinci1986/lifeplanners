@@ -253,8 +253,12 @@ function handleAIProxy(data) {
         return jsonOut({ ok: true, text: text, model: MODELS[i] });
       }
       lastErr = body.error.message || 'AI error';
-      // Unknown/retired model → try next; other errors (bad key, rate limit) → stop
-      if (!/does not exist|decommissioned|deprecated|not found|no longer supported/i.test(lastErr)) break;
+      // Retired model OR rate-limited → try next model (each model has its own
+      // rate bucket). Other errors (bad key, malformed request) → stop.
+      if (!/does not exist|decommissioned|deprecated|not found|no longer supported|rate limit|rate_limit|tokens per minute|try again/i.test(lastErr)) break;
+    }
+    if (/rate limit|rate_limit|tokens per minute|try again/i.test(lastErr)) {
+      return jsonOut({ ok: false, error: 'AI is busy right now — wait ~30 seconds and try again.' });
     }
     return jsonOut({ ok: false, error: lastErr });
   } catch (err) {
