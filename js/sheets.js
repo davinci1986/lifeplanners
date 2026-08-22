@@ -173,22 +173,65 @@ async function syncLocalToSheets() {
   }, 2000);
 }
 
+// Index of the updated_at column per sheet (see SHEET_DEFS above), used by
+// the newest-wins guard in pushRowsBatch. Reminders has no updated_at column,
+// so it is intentionally absent and stays unguarded.
+const UPDATED_AT_COL = { Contacts: 11, Cases: 21 };
+
+// True when the Sheet's copy of a row is newer than ours. A missing or
+// unparseable sheet timestamp means "we can't tell" — local wins, which is
+// the old behaviour.
+function isSheetRowNewer(sheetTs, localTs) {
+  if (!sheetTs) return false;
+  const s = new Date(sheetTs).getTime();
+  if (isNaN(s)) return false;
+  const l = new Date(localTs || 0).getTime();
+  return s > (isNaN(l) ? 0 : l);
+}
+
 // Batch sync: ONE read + ONE update + ONE append per sheet (quota-friendly).
 // Old version did a full sheet read per item — 143 contacts = 143 reads,
 // which always exceeded Google's 60 reads/min quota and never finished.
-async function pushRowsBatch(sheetName, items, toRow) {
+async function pushRowsBatch(sheetName, items, toRow, collection, fromRow) {
   if (items.length === 0) return;
   const existing = await sheetsReadAll(sheetName);
   const idToSheetRow = new Map();
-  existing.forEach((r, i) => idToSheetRow.set(r[0], i + 2)); // +1 header, +1 1-based
+  const idToRawRow = new Map();
+  existing.forEach((r, i) => {
+    idToSheetRow.set(r[0], i + 2); // +1 header, +1 1-based
+    idToRawRow.set(r[0], r);
+  });
+  const tsCol = UPDATED_AT_COL[sheetName];
 
   const updates = [];
   const appends = [];
+  const staleRows = []; // sheet rows newer than our copy — pulled back below
+
   for (const item of items) {
-    const row = toRow(item);
     const sheetRow = idToSheetRow.get(item.id);
-    if (sheetRow) updates.push({ range: `${sheetName}!A${sheetRow}`, values: [row] });
-    else appends.push(row);
+    if (!sheetRow) { appends.push(toRow(item)); continue; }
+
+    // Newest wins. Without this the push overwrites the sheet row by id
+    // regardless of age, so a tab left open since morning silently reverts
+    // an edit made later on another device. A genuine local edit always wins
+    // here because updateContact()/updateCase() stamp updatedAt.
+    if (tsCol !== undefined) {
+      const raw = idToRawRow.get(item.id);
+      if (raw && isSheetRowNewer(raw[tsCol], item.updatedAt)) { staleRows.push(raw); continue; }
+    }
+
+    updates.push({ range: `${sheetName}!A${sheetRow}`, values: [toRow(item)] });
+  }
+
+  // Adopt the newer rows locally so the next edit builds on them instead of
+  // on the stale copy. Deliberately persisted WITHOUT saveDB(): saveDB()
+  // re-triggers syncLocalToSheets() and would cost another full sync round.
+  // No re-render either — that would clobber a form the user is mid-way
+  // through; the newer data shows on the next natural render.
+  if (staleRows.length > 0 && collection && fromRow) {
+    mergeMyRows(collection, staleRows, fromRow, (currentUserEmail() || '').toLowerCase());
+    try { localStorage.setItem(DB_KEY, JSON.stringify(DB)); } catch (e) { /* quota */ }
+    console.info(`Sync: kept ${staleRows.length} newer ${sheetName} row(s) from the Sheet`);
   }
 
   if (updates.length > 0) {
@@ -232,11 +275,13 @@ function reminderToRow(r) {
 }
 
 async function pushContactsToSheets() {
-  await pushRowsBatch('Contacts', getContacts().filter(c => shouldSyncItem(c)), contactToRow);
+  await pushRowsBatch('Contacts', getContacts().filter(c => shouldSyncItem(c)), contactToRow,
+                     'contacts', sheetRowToContact);
 }
 
 async function pushCasesToSheets() {
-  await pushRowsBatch('Cases', getCases().filter(c => shouldSyncItem(c)), caseToRow);
+  await pushRowsBatch('Cases', getCases().filter(c => shouldSyncItem(c)), caseToRow,
+                     'cases', sheetRowToCase);
 }
 
 async function pushRemindersToSheets() {
