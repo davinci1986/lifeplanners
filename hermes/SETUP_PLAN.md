@@ -92,7 +92,8 @@ Apps Script project, then add one line to `doPost`.
 
 ## 5. Two problems in the current code that block Phase 2
 
-These are real and I verified both. They are prerequisites, not nice-to-haves.
+Both verified against the live source. **Blocker 2 is now fixed** (see below); blocker 1 is still
+open.
 
 ### 5.1 The Apps Script web app is completely unauthenticated 🔴
 
@@ -107,7 +108,7 @@ client cases." So:
 > Already implemented in `hermes/bridge/lifeplanner_bridge.gs` (`authOk()` — SHA-256 digest
 > compare, not a plain `==`). Separately worth adding the same guard to `ai`/`otp`.
 
-### 5.2 The browser blindly overwrites the Sheet 🔴
+### 5.2 The browser blindly overwrites the Sheet ✅ FIXED
 
 `pushRowsBatch()` (`js/sheets.js:179`) writes local rows over sheet rows **by id, with no
 `updated_at` comparison**. The pull side (`mergeMyRows`) is newest-wins, but the pull only runs on
@@ -118,16 +119,23 @@ since 08:00 holding a stale copy. At 11:00 you edit any unrelated contact → `s
 `syncLocalToSheets()` pushes **every** case you own, including the stale one → **Hermes's update is
 silently gone.** No error, no conflict, no trace.
 
-Two ways out:
+**Fixed** in commit *"Fix silent data loss: sync no longer overwrites newer Sheet rows"*.
+`pushRowsBatch` now compares each row against the sheet's `updated_at` before pushing. Rows the
+Sheet knows better are skipped and merged back into the local DB, so the next edit builds on the
+newer version rather than the stale one. A genuine local edit still always wins, because
+`updateContact()` and `updateCase()` stamp `updatedAt`.
 
-- **Recommended — guard the push** (~6 lines in `pushRowsBatch`): read the existing row's
-  `updated_at` and skip the update when the sheet is newer than local. Small, surgical, and it
-  fixes multi-device races you already have today, independent of Hermes.
-- **Zero-risk fallback:** Hermes never touches `Cases`; it appends to a new `AgentInbox` sheet and
-  the app drains it on next load. Safer, but changes aren't live until you open the app — which
-  defeats most of the point of the daily brief.
+Worth knowing: this bug already affected you across devices — phone and laptop open at once could
+lose an edit exactly the same way. Hermes only made it easier to notice.
 
-Until one of these lands, **keep Hermes read-only.** Phase 1 is genuinely useful on its own.
+Two limits to be aware of:
+
+- **`Reminders` is still unguarded** — that sheet has no `updated_at` column, so there's nothing to
+  compare. It's append-only from the bridge, so it isn't a live risk, but marking a reminder done
+  from two places can still race. Adding the column is a schema change for another day.
+- The corrected data lands in the local DB **without forcing a re-render** (a re-render would wipe
+  a form you're mid-way through typing), so a stale-looking screen refreshes on the next natural
+  render, not instantly.
 
 ---
 
@@ -165,9 +173,10 @@ Each phase has an exit test. Don't start the next one until the test passes.
 **Exit test:** answers match what the app shows. Cross-check three names by hand — if Hermes
 invents one client, stop and fix the skill before going further.
 
-### Phase 2 — Writes + the daily brief (≈1 hr, after §5 is fixed)
+### Phase 2 — Writes + the daily brief (≈1 hr)
 
-1. Land the `pushRowsBatch` timestamp guard (or the `AgentInbox` fallback).
+1. ~~Land the `pushRowsBatch` timestamp guard~~ — done. Add the token check to the existing
+   `ai` / `otp` routes (§5.1) before going live.
 2. Enable the write endpoints in the bridge (`lp:'update'`, `lp:'reminder'`).
 3. Install `hermes/skills/lifeplanner-daily-brief/`.
 4. Set `TELEGRAM_HOME_CHANNEL` to your chat ID so scheduled results land somewhere.

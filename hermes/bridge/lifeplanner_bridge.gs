@@ -19,10 +19,10 @@
 
 // ── CONFIG ────────────────────────────────────────────────────────
 const BRIDGE_TOKEN  = '';     // ← paste a long random string (40+ chars)
-const BRIDGE_WRITES = false;  // ← leave false until js/sheets.js has the
-                              //    pushRowsBatch timestamp guard (see
-                              //    SETUP_PLAN.md §5.2), or Hermes's edits
-                              //    get silently overwritten by the browser.
+const BRIDGE_WRITES = false;  // ← flip to true at Phase 2. The sync guard
+                              //    this depended on is now in js/sheets.js,
+                              //    so the remaining prerequisite is a token
+                              //    check on the ai/otp routes (§5.1).
 
 // Column indices — must match SHEET_DEFS in js/sheets.js
 const C = { id:0, owner:1, contactId:2, contactName:3, category:4, label:5,

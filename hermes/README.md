@@ -17,5 +17,6 @@ installed; these files sit inert until the Phase 0 installer is run.
 | `skills/lifeplanner-team/` | Role-scoped staff handling |
 | `skills/lifeplanner-dev/` | Driving Claude Code against this repo |
 
-Two blockers must be cleared before Hermes gets write access — both are existing issues in the
-current codebase, documented in `SETUP_PLAN.md` §5.
+Two blockers stood between Hermes and write access, both pre-existing issues in the codebase and
+documented in `SETUP_PLAN.md` §5. The sync data-loss bug (§5.2) is **fixed**; adding a token check
+to the existing `ai` / `otp` routes (§5.1) is still open.
