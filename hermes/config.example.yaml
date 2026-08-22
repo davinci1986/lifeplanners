@@ -1,0 +1,50 @@
+# ── ~/.hermes/config.yaml ─────────────────────────────────────────
+# Non-secret settings. Secrets go in .env.
+# Apply with: hermes config set <key> <value>
+
+# Provider is set by `hermes setup --portal` — leave it managed.
+# Requirement: >=64k context. Do not point this at a small-context
+# model; multi-step tool loops will truncate and behave erratically.
+model: anthropic/claude-opus-4.6
+
+agent:
+  name: Hermes
+  # Persona shown to Keith and (Phase 5) his agents.
+  persona: |
+    You assist Keith, a Malaysian AIA insurance advisor running
+    LifePlanner Pro. Be concise and practical. Use Malaysian context
+    (RM, local norms, Bahasa/English/Mandarin client mix).
+    Use ONLY data returned by the LifePlanner bridge. If data is
+    missing, say so. NEVER invent policy numbers, premiums, client
+    details or claim statuses — a fabricated figure quoted to a client
+    is a compliance problem, not a bug.
+
+memory:
+  enabled: true
+  # Hermes writes skills after complex tasks. Review new skills before
+  # trusting them with writes — see SETUP_PLAN.md §6 Phase 2.
+  auto_skills: true
+
+gateway:
+  telegram:
+    enabled: true
+    # Phase 0-4: private chat only. Turn group support on at Phase 5,
+    # and remember to re-add the bot to groups after changing privacy
+    # mode in BotFather.
+    groups: false
+
+# Phase 2+. Times are on the host machine — set the VPS to Asia/Kuala_Lumpur
+# (`sudo timedatectl set-timezone Asia/Kuala_Lumpur`) or the brief fires at
+# the wrong hour.
+schedules:
+  - name: morning-brief
+    cron: "0 8 * * 1-6"      # 8:00am Mon-Sat
+    prompt: "Run the lifeplanner-daily-brief skill and send it to my home channel."
+  - name: weekly-team-digest
+    cron: "0 18 * * 5"       # 6:00pm Friday
+    prompt: "Run the lifeplanner-team skill for a weekly digest and send it to me."
+
+# Hermes has terminal access. Keep the blast radius small.
+terminal:
+  backend: local
+  workdir: ~/projects/lifeplanners
